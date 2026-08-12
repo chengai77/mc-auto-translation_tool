@@ -134,7 +134,7 @@ public final class TranslationDiagnosticsSnapshot {
         if ("tencent-hunyuan".equalsIgnoreCase(provider)) {
             return translator.translate("value.universal_translator.provider_tencent");
         }
-        if ("openai-compatible".equalsIgnoreCase(provider)) {
+        if (isCustomApiProvider(provider)) {
             return translator.translate("value.universal_translator.provider_llm");
         }
         return provider.isEmpty() ? translator.translate("value.universal_translator.not_set") : provider;
@@ -188,7 +188,15 @@ public final class TranslationDiagnosticsSnapshot {
         if ("tencent-hunyuan".equalsIgnoreCase(provider)) {
             return "腾讯混元";
         }
+        if (isCustomApiProvider(provider)) {
+            return "自定义 API";
+        }
         return provider.isEmpty() ? "未设置" : provider;
+    }
+
+    private static boolean isCustomApiProvider(String provider) {
+        return "custom-api".equalsIgnoreCase(provider)
+                || "openai-compatible".equalsIgnoreCase(provider);
     }
 
     private static String onOff(boolean value) {

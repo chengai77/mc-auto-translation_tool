@@ -9,6 +9,7 @@ import org.universaltranslator.core.offline.OfflineEngineAsset;
 import org.universaltranslator.core.offline.OfflineProcessSupport;
 import org.universaltranslator.core.provider.FallbackTranslationProvider;
 import org.universaltranslator.core.provider.LlamaCppOfflineProvider;
+import org.universaltranslator.core.provider.OpenAiChatTranslationProvider;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
@@ -42,14 +43,19 @@ public final class CoreSelfTest {
         completesQueuedRequestsWhenClosed();
         fallsBackToOriginalOnFailure();
         enforcesSafeEndpoints();
+        normalizesCustomOpenAiEndpoints();
         handlesJsonStrings();
         updatesRenderLookupsWithoutBlocking();
         translatesRelatedTooltipLinesTogether();
+        translatesWrappedVisualLinesAsOneSentence();
         translatesOutgoingChatAsynchronously();
         exposesRenderTranslationFailures();
         protectsLiteralsOffTheRenderThread();
         boundsBusyLobbyTranslationWork();
         rateLimitsBusyLobbyWithoutStarvingTooltips();
+        urgentTitlesBypassBlockedNormalQueue();
+        titleLookupsNeverBlockRenderThread();
+        cacheHitsRenderImmediatelyAfterRestart();
         doesNotTranslateCompletedOutputAgain();
         persistsOnlyHashedCacheKeys();
         ignoresMalformedPersistentCache();
@@ -325,6 +331,20 @@ public final class CoreSelfTest {
         assertThrows(() -> EndpointPolicy.requireSafeEndpoint("https://user:secret@translate.example/translate"));
     }
 
+    private static void normalizesCustomOpenAiEndpoints() {
+        assertEquals("https://api.example.com/v1/chat/completions",
+                OpenAiChatTranslationProvider.normalizeChatCompletionsEndpoint("https://api.example.com"));
+        assertEquals("https://api.example.com/v1/chat/completions",
+                OpenAiChatTranslationProvider.normalizeChatCompletionsEndpoint("https://api.example.com/v1/"));
+        assertEquals("https://api.example.com/custom/v1/chat/completions",
+                OpenAiChatTranslationProvider.normalizeChatCompletionsEndpoint("https://api.example.com/custom/v1"));
+        assertEquals("https://api.example.com/openai/chat/completions",
+                OpenAiChatTranslationProvider.normalizeChatCompletionsEndpoint(
+                        "https://api.example.com/openai/chat/completions/"));
+        assertThrows(() -> OpenAiChatTranslationProvider.normalizeChatCompletionsEndpoint(
+                "https://api.example.com/v1?token=secret"));
+    }
+
     private static void handlesJsonStrings() {
         String value = "line 1\n\"\u91d1\u5e01\" \\";
         String json = "{\"translatedText\":" + JsonStrings.quote(value) + "}";
@@ -382,7 +402,26 @@ public final class CoreSelfTest {
                 translated = session.lookupLines(original, TextKind.TOOLTIP);
             } while (original.equals(translated) && System.currentTimeMillis() < deadline);
             assertEquals(Arrays.asList("在线玩家", "金币"), translated);
+            assertEquals("Players online Coins", provider.lastRequest.get());
             assertEquals(1, provider.calls.get());
+        }
+    }
+
+    private static void translatesWrappedVisualLinesAsOneSentence() throws Exception {
+        RecordingProvider provider = new RecordingProvider("joined sentence result");
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                provider, "auto", "zh-CN", 100, 1)) {
+            java.util.List<String> original = Arrays.asList("Welcome to", "the server");
+            assertEquals(original, session.lookupLines(original, TextKind.CHAT));
+            long deadline = System.currentTimeMillis() + 2000L;
+            java.util.List<String> translated;
+            do {
+                Thread.sleep(10L);
+                translated = session.lookupLines(original, TextKind.CHAT);
+            } while (original.equals(translated) && System.currentTimeMillis() < deadline);
+            assertEquals("Welcome to the server", provider.lastRequest.get());
+            assertEquals(1, provider.calls.get());
+            assertEquals(Arrays.asList("joined sentence", "result"), translated);
         }
     }
 
@@ -420,6 +459,7 @@ public final class CoreSelfTest {
 
             long deadline = System.currentTimeMillis() + 2000L;
             while (iterationThread.get() == null && System.currentTimeMillis() < deadline) {
+                session.lookup("Welcome Steve_42", TextKind.CHAT);
                 Thread.sleep(10L);
             }
             assertTrue(iterationThread.get() != null
@@ -457,6 +497,69 @@ public final class CoreSelfTest {
             }
             assertEquals(TextKind.TOOLTIP, provider.lastKind.get());
             assertTrue(provider.calls.get() <= 5);
+        }
+    }
+
+    private static void urgentTitlesBypassBlockedNormalQueue() throws Exception {
+        UrgentBypassProvider provider = new UrgentBypassProvider();
+        try (TranslationCoordinator coordinator = new TranslationCoordinator(
+                provider, new TranslationCache(100), 2)) {
+            coordinator.translate("Normal queued one", "auto", "zh-CN", TextKind.OTHER);
+            coordinator.translate("Normal queued two", "auto", "zh-CN", TextKind.OTHER);
+            assertTrue(provider.normalStarted.await(1, TimeUnit.SECONDS));
+            TranslationResult title = coordinator.translate(
+                    "Server restarting", "auto", "zh-CN", TextKind.TITLE)
+                    .get(500, TimeUnit.MILLISECONDS);
+            assertEquals("服务器正在重启", title.getTranslatedText());
+        } finally {
+            provider.releaseNormal.countDown();
+        }
+    }
+
+    private static void titleLookupsNeverBlockRenderThread() throws Exception {
+        TranslationProvider provider = new TranslationProvider() {
+            @Override
+            public String id() {
+                return "slow-title-test";
+            }
+
+            @Override
+            public String translate(TranslationRequest request) throws Exception {
+                Thread.sleep(600L);
+                return "服务器正在重启";
+            }
+        };
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                provider, "auto", "zh-CN", 100, 1)) {
+            long start = System.nanoTime();
+            assertEquals("Server restarting", session.lookup("Server restarting", TextKind.TITLE));
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            assertTrue(elapsedMillis < 100L);
+        }
+    }
+
+    private static void cacheHitsRenderImmediatelyAfterRestart() throws Exception {
+        Path directory = Files.createTempDirectory("universal-translator-render-cache-");
+        Path file = directory.resolve("cache.properties");
+        CountingProvider firstProvider = new CountingProvider(false);
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                firstProvider, "auto", "zh-CN", new PersistentTranslationCache(file, 100), 1)) {
+            session.lookup("Coins: 42", TextKind.TITLE);
+            long deadline = System.currentTimeMillis() + 2_000L;
+            String translated;
+            do {
+                Thread.sleep(10L);
+                translated = session.lookup("Coins: 42", TextKind.TITLE);
+            } while ("Coins: 42".equals(translated) && System.currentTimeMillis() < deadline);
+            assertEquals("金币: 42", translated);
+            assertEquals(1, firstProvider.calls.get());
+        }
+
+        CountingProvider secondProvider = new CountingProvider(false);
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                secondProvider, "auto", "zh-CN", new PersistentTranslationCache(file, 100), 1)) {
+            assertEquals("金币: 42", session.lookup("Coins: 42", TextKind.TITLE));
+            assertEquals(0, secondProvider.calls.get());
         }
     }
 
@@ -713,8 +816,29 @@ public final class CoreSelfTest {
         }
     }
 
+    private static final class UrgentBypassProvider implements TranslationProvider {
+        private final CountDownLatch normalStarted = new CountDownLatch(2);
+        private final CountDownLatch releaseNormal = new CountDownLatch(1);
+
+        @Override
+        public String id() {
+            return "urgent-bypass-test";
+        }
+
+        @Override
+        public String translate(TranslationRequest request) throws Exception {
+            if (request.getKind() == TextKind.TITLE) {
+                return "服务器正在重启";
+            }
+            normalStarted.countDown();
+            releaseNormal.await(5L, TimeUnit.SECONDS);
+            return request.getText();
+        }
+    }
+
     private static final class CountingProvider implements TranslationProvider {
         private final AtomicInteger calls = new AtomicInteger();
+        private final AtomicReference<String> lastRequest = new AtomicReference<String>();
         private final boolean fail;
 
         private CountingProvider(boolean fail) {
@@ -729,6 +853,7 @@ public final class CoreSelfTest {
         @Override
         public String translate(TranslationRequest request) throws Exception {
             calls.incrementAndGet();
+            lastRequest.set(request.getText());
             if (fail) {
                 throw new Exception("simulated outage");
             }
@@ -772,7 +897,17 @@ public final class CoreSelfTest {
     }
 
     private static final class RecordingProvider implements TranslationProvider {
+        private final AtomicInteger calls = new AtomicInteger();
         private final AtomicReference<String> lastRequest = new AtomicReference<String>();
+        private final String fixedResponse;
+
+        private RecordingProvider() {
+            this(null);
+        }
+
+        private RecordingProvider(String fixedResponse) {
+            this.fixedResponse = fixedResponse;
+        }
 
         @Override
         public String id() {
@@ -781,7 +916,11 @@ public final class CoreSelfTest {
 
         @Override
         public String translate(TranslationRequest request) {
+            calls.incrementAndGet();
             lastRequest.set(request.getText());
+            if (fixedResponse != null) {
+                return fixedResponse;
+            }
             return request.getText().replace("Welcome", "欢迎");
         }
     }

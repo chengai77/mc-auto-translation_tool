@@ -4,9 +4,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.Collections;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.function.BiConsumer;
 
 /**
  * Non-blocking lookup facade for render hooks. The first frame returns the original;
@@ -18,7 +21,11 @@ public final class RenderTranslationSession implements AutoCloseable {
     private static final int MAX_RENDERED_TRANSLATIONS = 4_096;
     private static final int MAX_FAILED_TRANSLATIONS = 1_024;
     private static final int MAX_BACKGROUND_SUBMISSIONS_PER_SECOND = 4;
-    private static final int MAX_PRIORITY_SUBMISSIONS_PER_SECOND = 12;
+    private static final int MAX_PRIORITY_SUBMISSIONS_PER_SECOND = 16;
+    private static final int MAX_URGENT_SUBMISSIONS_PER_SECOND = 30;
+    private static final long VISUAL_GROUP_WINDOW_MILLIS = 80L;
+    private static final int MAX_VISUAL_GROUP_LINES = 8;
+    private static final int MAX_VISUAL_GROUP_TEXT_LENGTH = 420;
 
     private final TranslationCoordinator coordinator;
     private final String sourceLanguage;
@@ -34,8 +41,12 @@ public final class RenderTranslationSession implements AutoCloseable {
             new SubmissionWindow(MAX_BACKGROUND_SUBMISSIONS_PER_SECOND);
     private final SubmissionWindow prioritySubmissions =
             new SubmissionWindow(MAX_PRIORITY_SUBMISSIONS_PER_SECOND);
+    private final SubmissionWindow urgentSubmissions =
+            new SubmissionWindow(MAX_URGENT_SUBMISSIONS_PER_SECOND);
+    private final VisualLineGrouper visualLineGrouper = new VisualLineGrouper();
     private volatile boolean closed;
     private volatile String lastFailureStatus = "";
+    private volatile BiConsumer<TextKind, String> urgentCompletionListener;
     private volatile Supplier<? extends Iterable<String>> protectedLiterals =
             new Supplier<Iterable<String>>() {
                 @Override
@@ -113,10 +124,29 @@ public final class RenderTranslationSession implements AutoCloseable {
             return original;
         }
         TextKind effectiveKind = kind == null ? TextKind.OTHER : kind;
+        VisualLineGroup group = visualLineGrouper.group(original, effectiveKind);
+        if (group != null) {
+            String grouped = lookupDirect(group.text, effectiveKind);
+            if (!group.text.equals(grouped)) {
+                return group.lineResult(grouped);
+            }
+        }
+        return lookupDirect(original, effectiveKind);
+    }
+
+    private String lookupDirect(String original, TextKind effectiveKind) {
         RenderKey key = new RenderKey(original, effectiveKind);
         String ready = translated.get(key);
         if (ready != null) {
             return ready;
+        }
+
+        TranslationResult cached = coordinator.cachedTranslation(
+                original, sourceLanguage, targetLanguage, effectiveKind,
+                Collections.<String>emptyList(), preserveHanText);
+        if (cached != null) {
+            completeLookup(key, original, cached, null);
+            return renderResult(original, cached);
         }
 
         Long retryAt = retryAfter.get(key);
@@ -141,63 +171,104 @@ public final class RenderTranslationSession implements AutoCloseable {
             return original;
         }
         if (pending.putIfAbsent(key, Boolean.TRUE) == null) {
-            Iterable<String> literals;
-            try {
-                literals = protectedLiterals.get();
-            } catch (RuntimeException ignored) {
-                literals = Collections.emptyList();
-            }
-            coordinator.translate(original, sourceLanguage, targetLanguage, effectiveKind,
-                            literals, preserveHanText)
-                    .whenComplete((result, error) -> completeLookup(
-                            key, original, result, error));
+            CompletableFuture<TranslationResult> future = coordinator.translate(
+                    original, sourceLanguage, targetLanguage, effectiveKind,
+                    snapshotProtectedLiterals(), preserveHanText);
+            future.whenComplete((result, error) -> completeLookup(
+                    key, original, result, error));
         }
         return original;
     }
 
     /**
-     * Translates related lines as one request so item names and lore retain context.
-     * The original list is returned until the background translation is ready.
+     * Translates related visual lines as one semantic text. Minecraft often wraps one
+     * sentence into multiple render lines (chat, signs, books, tooltips); those wraps
+     * must not become translation boundaries.
      */
     public List<String> lookupLines(List<String> originals, TextKind kind) {
         if (originals == null || originals.isEmpty()) {
             return originals;
         }
-        // Bilingual formatting inserts the original and translated text together.
-        // Preserve the established one-output-line-per-input-line behavior in that mode.
-        if (displayMode == TranslationDisplayMode.ORIGINAL_AND_TRANSLATED) {
-            List<String> replacement = new ArrayList<String>(originals.size());
-            boolean changed = false;
-            for (String original : originals) {
-                String translated = lookup(original, kind);
-                replacement.add(translated);
-                changed |= original == null ? translated != null : !original.equals(translated);
-            }
-            return changed ? replacement : originals;
+        String originalText = joinVisualLines(originals);
+        if (originalText.isEmpty()) {
+            return originals;
         }
-        StringBuilder joined = new StringBuilder();
-        for (int index = 0; index < originals.size(); index++) {
-            String line = originals.get(index);
-            if (line == null || line.indexOf('\n') >= 0 || line.indexOf('\r') >= 0) {
-                return originals;
-            }
-            if (index > 0) {
-                joined.append('\n');
-            }
-            joined.append(line);
-        }
-        String originalText = joined.toString();
         String translatedText = lookup(originalText, kind);
         if (originalText.equals(translatedText)) {
             return originals;
         }
-        String[] translatedLines = translatedText.split("\\n", -1);
-        if (translatedLines.length != originals.size()) {
-            return originals;
+        return distributeVisualLines(originals, translatedText);
+    }
+
+    private static String joinVisualLines(List<String> lines) {
+        StringBuilder joined = new StringBuilder();
+        for (String line : lines) {
+            if (line == null) {
+                continue;
+            }
+            String normalized = line.replace('\n', ' ').replace('\r', ' ').trim();
+            if (normalized.isEmpty()) {
+                continue;
+            }
+            if (joined.length() > 0 && needsSpace(joined.charAt(joined.length() - 1), normalized.charAt(0))) {
+                joined.append(' ');
+            }
+            joined.append(normalized);
         }
-        List<String> replacement = new ArrayList<String>(translatedLines.length);
-        Collections.addAll(replacement, translatedLines);
+        return joined.toString();
+    }
+
+    private static boolean needsSpace(char before, char after) {
+        if (Character.isWhitespace(before) || Character.isWhitespace(after)) {
+            return false;
+        }
+        return isAsciiWord(before) && isAsciiWord(after);
+    }
+
+    private static boolean isAsciiWord(char value) {
+        return value < 128 && Character.isLetterOrDigit(value);
+    }
+
+    private static List<String> distributeVisualLines(List<String> originals, String translatedText) {
+        List<String> normalizedTranslated = normalizeTranslatedLines(translatedText);
+        if (normalizedTranslated.size() == originals.size()) {
+            return normalizedTranslated;
+        }
+        List<String> replacement = new ArrayList<String>(originals.size());
+        boolean placed = false;
+        String compactTranslated = translatedText == null ? "" : translatedText.replace('\n', ' ').replace('\r', ' ').trim();
+        for (String original : originals) {
+            if (original == null || original.trim().isEmpty()) {
+                replacement.add(original);
+                continue;
+            }
+            if (!placed) {
+                replacement.add(compactTranslated);
+                placed = true;
+            } else {
+                replacement.add("");
+            }
+        }
         return replacement;
+    }
+
+    private static List<String> normalizeTranslatedLines(String translatedText) {
+        List<String> lines = new ArrayList<String>();
+        if (translatedText == null) {
+            lines.add("");
+            return lines;
+        }
+        String[] split = translatedText.split("\\R", -1);
+        for (String line : split) {
+            lines.add(line.trim());
+        }
+        return lines;
+    }
+
+    public void setUrgentCompletionListener(
+            BiConsumer<TextKind, String> urgentCompletionListener
+    ) {
+        this.urgentCompletionListener = urgentCompletionListener;
     }
 
     /**
@@ -232,6 +303,31 @@ public final class RenderTranslationSession implements AutoCloseable {
                 literals,
                 preserveHanText);
     }
+
+    private Iterable<String> snapshotProtectedLiterals() {
+        try {
+            return protectedLiterals.get();
+        } catch (RuntimeException ignored) {
+            return Collections.emptyList();
+        }
+    }
+
+    private static boolean isUrgent(TextKind kind) {
+        if (kind == null) {
+            return false;
+        }
+        switch (kind) {
+            case TITLE:
+            case SUBTITLE:
+            case ACTION_BAR:
+            case BOSS_BAR:
+            case TOAST:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private synchronized void completeLookup(
             RenderKey key,
             String original,
@@ -262,6 +358,22 @@ public final class RenderTranslationSession implements AutoCloseable {
             translatedOutputs.put(output, Boolean.TRUE);
             translatedOutputs.put(
                     TranslationTextStyling.stripLegacyFormatting(output), Boolean.TRUE);
+            notifyUrgentCompletion(key.kind, output);
+        }
+    }
+
+    private void notifyUrgentCompletion(TextKind kind, String output) {
+        if (!isUrgent(kind) || output == null || output.isEmpty()) {
+            return;
+        }
+        BiConsumer<TextKind, String> listener = urgentCompletionListener;
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.accept(kind, output);
+        } catch (RuntimeException ignored) {
+            // Platform UI callbacks are best-effort; never break render caching.
         }
     }
 
@@ -271,6 +383,13 @@ public final class RenderTranslationSession implements AutoCloseable {
         }
         String unformatted = TranslationTextStyling.stripLegacyFormatting(text);
         return unformatted != text && translatedOutputs.containsKey(unformatted);
+    }
+
+    private String renderResult(String original, TranslationResult result) {
+        if (result == null || !result.isTranslated()) {
+            return original;
+        }
+        return formatOutput(original, result.getTranslatedText());
     }
 
     private String formatOutput(String original, String translatedText) {
@@ -313,23 +432,28 @@ public final class RenderTranslationSession implements AutoCloseable {
         translatedOutputs.clear();
         pending.clear();
         retryAfter.clear();
+        visualLineGrouper.clear();
+        coordinator.clearCache();
         lastFailureStatus = "";
         backgroundSubmissions.reset();
         prioritySubmissions.reset();
+        urgentSubmissions.reset();
     }
 
     private SubmissionWindow submissionWindow(TextKind kind) {
         switch (kind) {
+            case TITLE:
+            case SUBTITLE:
+            case ACTION_BAR:
+            case BOSS_BAR:
+            case TOAST:
+                return urgentSubmissions;
             case CHAT:
             case SYSTEM_MESSAGE:
             case SCOREBOARD_TITLE:
             case SCOREBOARD_LINE:
             case PLAYER_LIST_HEADER:
             case PLAYER_LIST_FOOTER:
-            case ACTION_BAR:
-            case TITLE:
-            case SUBTITLE:
-            case BOSS_BAR:
             case CONTAINER_TITLE:
             case ITEM_NAME:
             case ITEM_LORE:
@@ -368,6 +492,132 @@ public final class RenderTranslationSession implements AutoCloseable {
         private synchronized void reset() {
             windowStartedAt = 0L;
             used = 0;
+        }
+    }
+
+    private static final class VisualLineGrouper {
+        private final LinkedHashMap<TextKind, VisualLineBucket> buckets =
+                new LinkedHashMap<TextKind, VisualLineBucket>();
+
+        private synchronized VisualLineGroup group(String original, TextKind kind) {
+            if (!shouldGroup(kind, original)) {
+                buckets.remove(kind);
+                return null;
+            }
+            long now = System.currentTimeMillis();
+            VisualLineBucket bucket = buckets.get(kind);
+            if (bucket == null || now - bucket.updatedAt > VISUAL_GROUP_WINDOW_MILLIS
+                    || bucket.lines.size() >= MAX_VISUAL_GROUP_LINES) {
+                bucket = new VisualLineBucket(kind);
+                buckets.put(kind, bucket);
+            }
+            bucket.add(original, now);
+            if (bucket.lines.size() < 2) {
+                return null;
+            }
+            String joined = joinVisualLines(bucket.lines);
+            if (joined.length() > MAX_VISUAL_GROUP_TEXT_LENGTH) {
+                bucket.reset(original, now);
+                return null;
+            }
+            return new VisualLineGroup(joined, original, bucket.lineIndex(original));
+        }
+
+        private synchronized void clear() {
+            buckets.clear();
+        }
+
+        private static boolean shouldGroup(TextKind kind, String original) {
+            if (original == null || original.indexOf('\n') >= 0 || original.indexOf('\r') >= 0) {
+                return false;
+            }
+            String trimmed = original.trim();
+            if (trimmed.length() < 2 || trimmed.length() > 140) {
+                return false;
+            }
+            switch (kind) {
+                case TITLE:
+                case SUBTITLE:
+                case ACTION_BAR:
+                case CHAT:
+                case SYSTEM_MESSAGE:
+                case SCOREBOARD_TITLE:
+                case SCOREBOARD_LINE:
+                case PLAYER_LIST_HEADER:
+                case PLAYER_LIST_FOOTER:
+                case BOSS_BAR:
+                case SIGN:
+                case BOOK:
+                case HOLOGRAM:
+                case OTHER:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+
+    private static final class VisualLineBucket {
+        private final TextKind kind;
+        private final List<String> lines = new ArrayList<String>();
+        private long updatedAt;
+
+        private VisualLineBucket(TextKind kind) {
+            this.kind = kind;
+        }
+
+        private void add(String original, long now) {
+            if (!lines.isEmpty() && lines.get(lines.size() - 1).equals(original)) {
+                updatedAt = now;
+                return;
+            }
+            if (lines.contains(original)) {
+                reset(original, now);
+                return;
+            }
+            lines.add(original);
+            updatedAt = now;
+        }
+
+        private void reset(String original, long now) {
+            lines.clear();
+            lines.add(original);
+            updatedAt = now;
+        }
+
+        private int lineIndex(String original) {
+            for (int index = 0; index < lines.size(); index++) {
+                if (lines.get(index).equals(original)) {
+                    return index;
+                }
+            }
+            return 0;
+        }
+    }
+
+    private static final class VisualLineGroup {
+        private final String text;
+        private final String currentLine;
+        private final int currentIndex;
+
+        private VisualLineGroup(String text, String currentLine, int currentIndex) {
+            this.text = text;
+            this.currentLine = currentLine;
+            this.currentIndex = currentIndex;
+        }
+
+        private String lineResult(String translatedText) {
+            List<String> translatedLines = normalizeTranslatedLines(translatedText);
+            if (translatedLines.size() > currentIndex) {
+                String line = translatedLines.get(currentIndex);
+                return line == null || line.isEmpty() ? currentLine : line;
+            }
+            if (currentIndex == 0) {
+                String compact = translatedText == null
+                        ? "" : translatedText.replace('\n', ' ').replace('\r', ' ').trim();
+                return compact.isEmpty() ? currentLine : compact;
+            }
+            return "";
         }
     }
 

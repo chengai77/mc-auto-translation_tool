@@ -4,7 +4,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -19,14 +19,18 @@ import java.util.Collections;
  */
 public final class TranslationCoordinator implements AutoCloseable {
     private static final int MAX_QUEUED_TRANSLATIONS = 128;
+    private static final int MAX_QUEUED_URGENT_TRANSLATIONS = 64;
     private static final String CACHE_FORMAT_VERSION = "translation-v5";
 
     private final TranslationProvider provider;
     private final TranslationStore cache;
     private final ThreadPoolExecutor executor;
+    private final ThreadPoolExecutor urgentExecutor;
+    private final boolean dedicatedUrgentExecutor;
     private final ConcurrentHashMap<String, CompletableFuture<TranslationResult>> inFlight =
             new ConcurrentHashMap<String, CompletableFuture<TranslationResult>>();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicInteger submissionSequence = new AtomicInteger();
 
     public TranslationCoordinator(TranslationProvider provider, TranslationStore cache, int workerCount) {
         this.provider = Objects.requireNonNull(provider, "provider");
@@ -39,9 +43,24 @@ public final class TranslationCoordinator implements AutoCloseable {
                 workerCount,
                 0L,
                 TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<Runnable>(MAX_QUEUED_TRANSLATIONS),
-                new TranslationThreadFactory(),
+                new PriorityBlockingQueue<Runnable>(),
+                new TranslationThreadFactory("universal-translator-"),
                 new ThreadPoolExecutor.AbortPolicy());
+        if (workerCount > 1) {
+            int urgentWorkers = Math.min(2, workerCount);
+            this.urgentExecutor = new ThreadPoolExecutor(
+                    urgentWorkers,
+                    urgentWorkers,
+                    0L,
+                    TimeUnit.MILLISECONDS,
+                    new PriorityBlockingQueue<Runnable>(),
+                    new TranslationThreadFactory("universal-translator-urgent-"),
+                    new ThreadPoolExecutor.AbortPolicy());
+            this.dedicatedUrgentExecutor = true;
+        } else {
+            this.urgentExecutor = this.executor;
+            this.dedicatedUrgentExecutor = false;
+        }
     }
 
     public CompletableFuture<TranslationResult> translate(
@@ -97,25 +116,37 @@ public final class TranslationCoordinator implements AutoCloseable {
             if (existing == null) {
                 existing = created;
                 try {
-                    executor.execute(() -> {
-                    try {
-                        ProtectedText protectedText = ProtectedText.parse(
-                                text, protectedLiterals, preserveHanText);
-                        if (!LanguageHeuristics.shouldTranslate(
-                                protectedText.getUnprotectedTemplateText(), targetLanguage)) {
-                            created.complete(TranslationResult.unchanged(text));
-                            return;
-                        }
-                        String restored = TranslationOutputValidator.requireDisplaySafe(
-                                text, translateSegments(protectedText, sourceLanguage, targetLanguage, kind));
-                        created.complete(TranslationResult.success(
-                                text, restored));
-                    } catch (Exception exception) {
-                        created.complete(TranslationResult.failure(text, exception.getMessage()));
-                    } finally {
-                        inFlight.remove(requestKey, created);
+                    ThreadPoolExecutor targetExecutor = executorFor(kind);
+                    int maximumQueueSize = targetExecutor == urgentExecutor && dedicatedUrgentExecutor
+                            ? MAX_QUEUED_URGENT_TRANSLATIONS : MAX_QUEUED_TRANSLATIONS;
+                    if (targetExecutor.getQueue().size() >= maximumQueueSize) {
+                        throw new RejectedExecutionException("Translation queue is busy");
                     }
-                    });
+                    targetExecutor.execute(new PrioritizedTranslationTask(
+                            priorityOf(kind),
+                            submissionSequence.incrementAndGet(),
+                            new Runnable() {
+                                @Override
+                                public void run() {
+                                    try {
+                                        ProtectedText protectedText = ProtectedText.parse(
+                                                text, protectedLiterals, preserveHanText);
+                                        if (!LanguageHeuristics.shouldTranslate(
+                                                protectedText.getUnprotectedTemplateText(), targetLanguage)) {
+                                            created.complete(TranslationResult.unchanged(text));
+                                            return;
+                                        }
+                                        String restored = TranslationOutputValidator.requireDisplaySafe(
+                                                text, translateSegments(protectedText, sourceLanguage, targetLanguage, kind));
+                                        created.complete(TranslationResult.success(
+                                                text, restored));
+                                    } catch (Exception exception) {
+                                        created.complete(TranslationResult.failure(text, exception.getMessage()));
+                                    } finally {
+                                        inFlight.remove(requestKey, created);
+                                    }
+                                }
+                            }));
                 } catch (RejectedExecutionException busy) {
                     inFlight.remove(requestKey, created);
                     created.complete(TranslationResult.failure(
@@ -124,6 +155,34 @@ public final class TranslationCoordinator implements AutoCloseable {
             }
         }
         return existing;
+    }
+
+    public TranslationResult cachedTranslation(
+            final String text,
+            final String sourceLanguage,
+            final String targetLanguage,
+            final TextKind kind,
+            final Iterable<String> protectedLiterals,
+            final boolean preserveHanText
+    ) {
+        Objects.requireNonNull(text, "text");
+        if (targetLanguage == null || targetLanguage.trim().isEmpty()) {
+            throw new IllegalArgumentException("targetLanguage is required");
+        }
+        if (!LanguageHeuristics.shouldTranslate(text, targetLanguage)) {
+            return TranslationResult.unchanged(text);
+        }
+        try {
+            ProtectedText protectedText = ProtectedText.parse(text, protectedLiterals, preserveHanText);
+            if (!LanguageHeuristics.shouldTranslate(protectedText.getUnprotectedTemplateText(), targetLanguage)) {
+                return TranslationResult.unchanged(text);
+            }
+            String restored = TranslationOutputValidator.requireDisplaySafe(
+                    text, translateCachedSegments(protectedText, sourceLanguage, targetLanguage));
+            return TranslationResult.success(text, restored);
+        } catch (RuntimeException invalidOrMissingCachedValue) {
+            return null;
+        }
     }
 
     private String translateSegments(
@@ -139,6 +198,22 @@ public final class TranslationCoordinator implements AutoCloseable {
             } else {
                 output.append(translateSegment(
                         segment.text(), sourceLanguage, targetLanguage, kind));
+            }
+        }
+        return output.toString();
+    }
+
+    private String translateCachedSegments(
+            ProtectedText protectedText,
+            String sourceLanguage,
+            String targetLanguage
+    ) {
+        StringBuilder output = new StringBuilder(protectedText.getOriginal().length() + 16);
+        for (ProtectedText.Segment segment : protectedText.getSegments()) {
+            if (segment.isProtectedValue()) {
+                output.append(segment.text());
+            } else {
+                output.append(translateCachedSegment(segment.text(), sourceLanguage, targetLanguage));
             }
         }
         return output.toString();
@@ -184,6 +259,41 @@ public final class TranslationCoordinator implements AutoCloseable {
         return segment.substring(0, start) + translated + segment.substring(end);
     }
 
+    private String translateCachedSegment(
+            String segment,
+            String sourceLanguage,
+            String targetLanguage
+    ) {
+        int start = 0;
+        int end = segment.length();
+        while (start < end && Character.isWhitespace(segment.charAt(start))) {
+            start++;
+        }
+        while (end > start && Character.isWhitespace(segment.charAt(end - 1))) {
+            end--;
+        }
+        String core = segment.substring(start, end);
+        if (!LanguageHeuristics.shouldTranslate(core, targetLanguage)) {
+            return segment;
+        }
+        String cacheKey = CACHE_FORMAT_VERSION + "\n" + provider.id()
+                + "\n" + sourceLanguage + "\n" + targetLanguage + "\n" + core;
+        String translated = cache.get(cacheKey);
+        if (translated == null) {
+            throw new IllegalStateException("Cached translation is missing");
+        }
+        translated = TranslationOutputValidator.requireValid(core, translated);
+        return segment.substring(0, start) + translated + segment.substring(end);
+    }
+
+    public void clearCache() {
+        cache.clear();
+        for (CompletableFuture<TranslationResult> future : inFlight.values()) {
+            future.cancel(false);
+        }
+        inFlight.clear();
+    }
+
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
@@ -198,6 +308,9 @@ public final class TranslationCoordinator implements AutoCloseable {
         }
         inFlight.clear();
         executor.shutdownNow();
+        if (dedicatedUrgentExecutor) {
+            urgentExecutor.shutdownNow();
+        }
         if (provider instanceof AutoCloseable) {
             try {
                 ((AutoCloseable) provider).close();
@@ -207,12 +320,81 @@ public final class TranslationCoordinator implements AutoCloseable {
         }
     }
 
+    private ThreadPoolExecutor executorFor(TextKind kind) {
+        return priorityOf(kind) == 0 ? urgentExecutor : executor;
+    }
+
+    private static int priorityOf(TextKind kind) {
+        if (kind == null) {
+            return 80;
+        }
+        switch (kind) {
+            case TITLE:
+            case SUBTITLE:
+            case ACTION_BAR:
+            case BOSS_BAR:
+            case TOAST:
+                return 0;
+            case CHAT:
+            case SYSTEM_MESSAGE:
+            case DISCONNECT_REASON:
+                return 10;
+            case CONTAINER_TITLE:
+            case ITEM_NAME:
+            case ITEM_LORE:
+            case TOOLTIP:
+            case SIGN:
+            case BOOK:
+                return 20;
+            case SCOREBOARD_TITLE:
+            case SCOREBOARD_LINE:
+            case PLAYER_LIST_HEADER:
+            case PLAYER_LIST_FOOTER:
+                return 40;
+            default:
+                return 80;
+        }
+    }
+
+    private static final class PrioritizedTranslationTask implements Runnable, Comparable<PrioritizedTranslationTask> {
+        private final int priority;
+        private final int sequence;
+        private final Runnable delegate;
+
+        private PrioritizedTranslationTask(int priority, int sequence, Runnable delegate) {
+            this.priority = priority;
+            this.sequence = sequence;
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void run() {
+            delegate.run();
+        }
+
+        @Override
+        public int compareTo(PrioritizedTranslationTask other) {
+            if (priority != other.priority) {
+                return priority < other.priority ? -1 : 1;
+            }
+            if (sequence == other.sequence) {
+                return 0;
+            }
+            return sequence < other.sequence ? -1 : 1;
+        }
+    }
+
     private static final class TranslationThreadFactory implements ThreadFactory {
         private final AtomicInteger sequence = new AtomicInteger();
+        private final String prefix;
+
+        private TranslationThreadFactory(String prefix) {
+            this.prefix = prefix;
+        }
 
         @Override
         public Thread newThread(Runnable runnable) {
-            Thread thread = new Thread(runnable, "universal-translator-" + sequence.incrementAndGet());
+            Thread thread = new Thread(runnable, prefix + sequence.incrementAndGet());
             thread.setDaemon(true);
             return thread;
         }

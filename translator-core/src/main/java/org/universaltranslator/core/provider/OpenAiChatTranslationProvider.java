@@ -9,6 +9,7 @@ import org.universaltranslator.core.net.HttpJsonClient;
 import org.universaltranslator.core.net.JsonStrings;
 
 import java.net.URI;
+import java.net.URISyntaxException;
 
 /** Small OpenAI-compatible chat provider used by local llama.cpp and optional hosted APIs. */
 public final class OpenAiChatTranslationProvider implements TranslationProvider {
@@ -29,7 +30,7 @@ public final class OpenAiChatTranslationProvider implements TranslationProvider 
             String providerId,
             HttpJsonClient http
     ) {
-        this.endpoint = EndpointPolicy.requireSafeEndpoint(endpoint);
+        this.endpoint = EndpointPolicy.requireSafeEndpoint(normalizeChatCompletionsEndpoint(endpoint));
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.model = requireText("model", model);
         this.providerId = requireText("providerId", providerId);
@@ -70,6 +71,47 @@ public final class OpenAiChatTranslationProvider implements TranslationProvider 
             throw new IllegalStateException("OpenAI-compatible response did not contain translated content");
         }
         return TranslationOutputValidator.requireValid(request.getText(), translated);
+    }
+
+    public static String normalizeChatCompletionsEndpoint(String siteUrl) {
+        if (siteUrl == null || siteUrl.trim().isEmpty()) {
+            throw new IllegalArgumentException("API site URL is required");
+        }
+        URI uri;
+        try {
+            uri = URI.create(siteUrl.trim());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("API site URL is not a valid URI", exception);
+        }
+        if (uri.getRawQuery() != null || uri.getRawFragment() != null) {
+            throw new IllegalArgumentException("API site URL must not contain query or fragment");
+        }
+
+        String path = trimTrailingSlashes(uri.getPath() == null ? "" : uri.getPath());
+        String normalizedPath;
+        if (path.isEmpty()) {
+            normalizedPath = "/v1/chat/completions";
+        } else if (path.endsWith("/chat/completions")) {
+            normalizedPath = path;
+        } else if (path.endsWith("/v1")) {
+            normalizedPath = path + "/chat/completions";
+        } else {
+            normalizedPath = path;
+        }
+        try {
+            return new URI(uri.getScheme(), uri.getUserInfo(), uri.getHost(), uri.getPort(),
+                    normalizedPath, null, null).toString();
+        } catch (URISyntaxException exception) {
+            throw new IllegalArgumentException("API site URL is not a valid URI", exception);
+        }
+    }
+
+    private static String trimTrailingSlashes(String value) {
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '/') {
+            end--;
+        }
+        return value.substring(0, end);
     }
 
     private static String requireText(String name, String value) {

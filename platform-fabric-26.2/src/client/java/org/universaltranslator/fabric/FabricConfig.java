@@ -21,7 +21,10 @@ import java.nio.file.Path;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Properties;
+import java.util.Set;
 
 final class FabricConfig {
     private static final String FILE_NAME = "universal-translator.properties";
@@ -50,6 +53,13 @@ final class FabricConfig {
     final String apiFallbackProvider;
     final Path offlineDirectory;
     final boolean diskCache;
+    final boolean pinnedLogEnabled;
+    final String pinnedLogPreset;
+    final int pinnedLogX;
+    final int pinnedLogY;
+    final int pinnedLogWidth;
+    final int pinnedLogScale;
+    final Set<TextKind> logAllowedKinds;
     final Path cacheFile;
     private final Path configFile;
 
@@ -76,10 +86,9 @@ final class FabricConfig {
         this.tencentSecretKey = properties.getProperty("tencent-secret-key", "").trim();
         this.tencentModel = properties.getProperty(
                 "tencent-model", "hunyuan-translation-lite").trim();
-        this.llmEndpoint = properties.getProperty(
-                "llm-api-endpoint", "http://127.0.0.1:8080/v1/chat/completions").trim();
+        this.llmEndpoint = properties.getProperty("llm-api-endpoint", "").trim();
         this.llmApiKey = properties.getProperty("llm-api-key", "").trim();
-        this.llmModel = properties.getProperty("llm-api-model", "local-model").trim();
+        this.llmModel = properties.getProperty("llm-api-model", "").trim();
         this.offlineAutoDownload = Boolean.parseBoolean(
                 properties.getProperty("offline-auto-download", "true"));
         this.offlineModel = OfflineModel.fromConfig(properties.getProperty("offline-model", "lite"));
@@ -87,6 +96,16 @@ final class FabricConfig {
         this.apiFallbackProvider = properties.getProperty(
                 "api-fallback-provider", "libretranslate").trim();
         this.diskCache = Boolean.parseBoolean(properties.getProperty("disk-cache", "true"));
+        this.pinnedLogEnabled = Boolean.parseBoolean(
+                properties.getProperty("pinned-log-enabled", "false"));
+        this.pinnedLogPreset = normalizePinnedPreset(
+                properties.getProperty("pinned-log-preset", "top-right"));
+        this.pinnedLogX = clampInt(properties.getProperty("pinned-log-x", "12"), 0, 500);
+        this.pinnedLogY = clampInt(properties.getProperty("pinned-log-y", "12"), 0, 500);
+        this.pinnedLogWidth = clampInt(properties.getProperty("pinned-log-width", "38"), 20, 90);
+        this.pinnedLogScale = clampInt(properties.getProperty("pinned-log-scale", "100"), 70, 160);
+        this.logAllowedKinds = Collections.unmodifiableSet(parseLogAllowedKinds(
+                properties.getProperty("log-allowed-kinds", defaultLogAllowedKinds())));
         this.configFile = configFile;
         this.cacheFile = cacheFile;
         this.offlineDirectory = configFile.getParent().resolve("universal-translator-offline");
@@ -110,13 +129,13 @@ final class FabricConfig {
         Properties properties = defaults();
         properties.putAll(stored);
         boolean legacyMigration = !stored.containsKey("config-version");
-        boolean migrated = configVersion(stored) < 3;
+        boolean migrated = configVersion(stored) < 5;
         if (legacyMigration) {
             properties.setProperty("display-mode", "translated-only");
             properties.setProperty("translate-english-only", "true");
             properties.setProperty("translated-text-color", "aqua");
         }
-        properties.setProperty("config-version", "3");
+        properties.setProperty("config-version", "5");
         LocalConfigSecurity.restrictToOwner(file);
         FabricConfig loaded = new FabricConfig(
                 properties, file, configDirectory.resolve("universal-translator-cache.properties"));
@@ -170,9 +189,48 @@ final class FabricConfig {
         return new FabricConfig(properties, configFile, cacheFile);
     }
 
+    FabricConfig withTencentSettings(String secretId, String secretKey, String model) {
+        Properties properties = toProperties();
+        properties.setProperty("tencent-secret-id", secretId == null ? "" : secretId);
+        properties.setProperty("tencent-secret-key", secretKey == null ? "" : secretKey);
+        properties.setProperty("tencent-model", model == null ? "hunyuan-translation-lite" : model);
+        return new FabricConfig(properties, configFile, cacheFile);
+    }
+
     FabricConfig withEnabled(boolean enabled) {
         Properties properties = toProperties();
         properties.setProperty("enabled", Boolean.toString(enabled));
+        return new FabricConfig(properties, configFile, cacheFile);
+    }
+
+    FabricConfig withPinnedLogSettings(
+            boolean pinnedLogEnabled,
+            String pinnedLogPreset,
+            int pinnedLogX,
+            int pinnedLogY,
+            int pinnedLogWidth,
+            int pinnedLogScale
+    ) {
+        Properties properties = toProperties();
+        properties.setProperty("pinned-log-enabled", Boolean.toString(pinnedLogEnabled));
+        properties.setProperty("pinned-log-preset", normalizePinnedPreset(pinnedLogPreset));
+        properties.setProperty("pinned-log-x", Integer.toString(clamp(pinnedLogX, 0, 500)));
+        properties.setProperty("pinned-log-y", Integer.toString(clamp(pinnedLogY, 0, 500)));
+        properties.setProperty("pinned-log-width", Integer.toString(clamp(pinnedLogWidth, 20, 90)));
+        properties.setProperty("pinned-log-scale", Integer.toString(clamp(pinnedLogScale, 70, 160)));
+        return new FabricConfig(properties, configFile, cacheFile);
+    }
+
+    FabricConfig withLogAllowedKind(TextKind kind, boolean allowed) {
+        Properties properties = toProperties();
+        EnumSet<TextKind> kinds = EnumSet.noneOf(TextKind.class);
+        kinds.addAll(logAllowedKinds);
+        if (allowed) {
+            kinds.add(kind);
+        } else {
+            kinds.remove(kind);
+        }
+        properties.setProperty("log-allowed-kinds", joinLogAllowedKinds(kinds));
         return new FabricConfig(properties, configFile, cacheFile);
     }
 
@@ -238,16 +296,21 @@ final class FabricConfig {
         if ("tencent-hunyuan".equalsIgnoreCase(selectedProvider)) {
             return new TencentHunyuanProvider(tencentSecretId, tencentSecretKey, tencentModel);
         }
-        if ("openai-compatible".equalsIgnoreCase(selectedProvider)) {
+        if (isCustomApiProvider(selectedProvider)) {
             return new OpenAiChatTranslationProvider(
-                    llmEndpoint, llmApiKey, llmModel, "openai-compatible");
+                    llmEndpoint, llmApiKey, llmModel, "custom-api");
         }
         throw new IllegalArgumentException("Unsupported translation provider: " + selectedProvider);
     }
 
+    private static boolean isCustomApiProvider(String selectedProvider) {
+        return "custom-api".equalsIgnoreCase(selectedProvider)
+                || "openai-compatible".equalsIgnoreCase(selectedProvider);
+    }
+
     private static Properties defaults() {
         Properties properties = new Properties();
-        properties.setProperty("config-version", "3");
+        properties.setProperty("config-version", "5");
         properties.setProperty("enabled", "false");
         properties.setProperty("translate-chat", "true");
         properties.setProperty("translate-other", "true");
@@ -263,20 +326,26 @@ final class FabricConfig {
         properties.setProperty("tencent-secret-id", "");
         properties.setProperty("tencent-secret-key", "");
         properties.setProperty("tencent-model", "hunyuan-translation-lite");
-        properties.setProperty("llm-api-endpoint", "http://127.0.0.1:8080/v1/chat/completions");
+        properties.setProperty("llm-api-endpoint", "");
         properties.setProperty("llm-api-key", "");
-        properties.setProperty("llm-api-model", "local-model");
+        properties.setProperty("llm-api-model", "");
         properties.setProperty("offline-auto-download", "true");
         properties.setProperty("offline-model", "lite");
         properties.setProperty("api-fallback", "false");
         properties.setProperty("api-fallback-provider", "libretranslate");
         properties.setProperty("disk-cache", "true");
+        properties.setProperty("pinned-log-enabled", "false");
+        properties.setProperty("pinned-log-preset", "top-right");
+        properties.setProperty("pinned-log-x", "12");
+        properties.setProperty("pinned-log-y", "12");
+        properties.setProperty("pinned-log-width", "38");
+        properties.setProperty("pinned-log-scale", "100");
         return properties;
     }
 
     private Properties toProperties() {
         Properties properties = new Properties();
-        properties.setProperty("config-version", "3");
+        properties.setProperty("config-version", "5");
         properties.setProperty("enabled", Boolean.toString(enabled));
         properties.setProperty("translate-chat", Boolean.toString(translateChat));
         properties.setProperty("translate-other", Boolean.toString(translateOther));
@@ -301,7 +370,65 @@ final class FabricConfig {
         properties.setProperty("api-fallback", Boolean.toString(apiFallback));
         properties.setProperty("api-fallback-provider", apiFallbackProvider);
         properties.setProperty("disk-cache", Boolean.toString(diskCache));
+        properties.setProperty("pinned-log-enabled", Boolean.toString(pinnedLogEnabled));
+        properties.setProperty("pinned-log-preset", pinnedLogPreset);
+        properties.setProperty("pinned-log-x", Integer.toString(pinnedLogX));
+        properties.setProperty("pinned-log-y", Integer.toString(pinnedLogY));
+        properties.setProperty("pinned-log-width", Integer.toString(pinnedLogWidth));
+        properties.setProperty("pinned-log-scale", Integer.toString(pinnedLogScale));
+        properties.setProperty("log-allowed-kinds", joinLogAllowedKinds(logAllowedKinds));
         return properties;
+    }
+
+    private static EnumSet<TextKind> parseLogAllowedKinds(String value) {
+        EnumSet<TextKind> kinds = EnumSet.noneOf(TextKind.class);
+        if (value != null) {
+            for (String token : value.split(",")) {
+                String normalized = token.trim();
+                if (normalized.isEmpty()) {
+                    continue;
+                }
+                try {
+                    kinds.add(TextKind.valueOf(normalized));
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+        }
+        return kinds;
+    }
+
+    private static String defaultLogAllowedKinds() {
+        return "TITLE,SUBTITLE,ACTION_BAR";
+    }
+
+    private static String joinLogAllowedKinds(Set<TextKind> kinds) {
+        StringBuilder builder = new StringBuilder();
+        for (TextKind kind : TextKind.values()) {
+            if (!kinds.contains(kind)) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(kind.name());
+        }
+        return builder.toString();
+    }
+
+    private static int clampInt(String value, int minimum, int maximum) {
+        try {
+            return clamp(Integer.parseInt(value.trim()), minimum, maximum);
+        } catch (RuntimeException ignored) {
+            return minimum;
+        }
+    }
+
+    private static int clamp(int value, int minimum, int maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    private static String normalizePinnedPreset(String value) {
+        return "top-left".equalsIgnoreCase(value) ? "top-left" : "top-right";
     }
 
     private static int configVersion(Properties properties) {

@@ -49,6 +49,9 @@ final class LegacyConfigScreen extends GuiScreen {
     private String llmEndpoint;
     private String llmApiKey;
     private String llmModel;
+    private String tencentSecretId;
+    private String tencentSecretKey;
+    private String tencentModel;
     private GuiTextField targetLanguage;
     private GuiTextField outgoingTargetLanguage;
     private GuiTextField endpoint;
@@ -73,6 +76,9 @@ final class LegacyConfigScreen extends GuiScreen {
         this.llmEndpoint = config.llmEndpoint;
         this.llmApiKey = config.llmApiKey;
         this.llmModel = config.llmModel;
+        this.tencentSecretId = config.tencentSecretId;
+        this.tencentSecretKey = config.tencentSecretKey;
+        this.tencentModel = config.tencentModel;
     }
 
     @Override
@@ -146,6 +152,9 @@ final class LegacyConfigScreen extends GuiScreen {
             if (isLlm()) {
                 mc.displayGuiScreen(new LegacyLlmConfigScreen(
                         this, llmEndpoint, llmModel, !llmApiKey.isEmpty()));
+            } else if (isTencent()) {
+                mc.displayGuiScreen(new LegacyTencentConfigScreen(
+                        this, tencentSecretId, tencentModel, !tencentSecretKey.isEmpty()));
             } else {
                 offlineAutoDownload = !offlineAutoDownload;
             }
@@ -182,13 +191,15 @@ final class LegacyConfigScreen extends GuiScreen {
         button(COLOR).displayString = tr("screen.universal_translator.option.color", colorLabel(translatedTextColor));
         button(DOWNLOAD).displayString = isLlm()
                 ? tr("screen.universal_translator.option.llm_settings")
-                : tr("screen.universal_translator.option.download", onOff(offlineAutoDownload));
+                : (isTencent()
+                ? tr("screen.universal_translator.option.tencent_settings")
+                : tr("screen.universal_translator.option.download", onOff(offlineAutoDownload)));
         button(MODEL).displayString = tr("screen.universal_translator.option.model", offlineModel.displayName());
         button(FALLBACK).displayString = tr("screen.universal_translator.option.fallback", onOff(apiFallback));
         button(OUTGOING).displayString = tr("screen.universal_translator.option.outgoing", onOff(translateOutgoing));
         button(TARGET_LANGUAGE).displayString = tr("screen.universal_translator.option.target_preset",
                 TargetLanguage.displayName(targetLanguage.getText()));
-        button(DOWNLOAD).enabled = isOffline() || isLlm();
+        button(DOWNLOAD).enabled = isOffline() || isLlm() || isTencent();
         button(MODEL).enabled = isOffline();
         button(FALLBACK).enabled = isOffline();
     }
@@ -219,25 +230,12 @@ final class LegacyConfigScreen extends GuiScreen {
             if (translateOutgoing && outgoingTargetLanguage.getText().trim().isEmpty()) {
                 throw new IllegalArgumentException(tr("error.universal_translator.outgoing_target_required"));
             }
-            LegacyConfig updated = original.withSettings(
-                    enabled,
-                    translateChat,
-                    translateOther,
-                    translateOutgoing,
-                    targetLanguage.getText(),
-                    outgoingTargetLanguage.getText(),
-                    displayMode,
-                    translateEnglishOnly,
-                    translatedTextColor,
-                    provider,
-                    endpoint.getText(),
-                    llmEndpoint,
-                    llmApiKey,
-                    llmModel,
-                    offlineAutoDownload,
-                    offlineModel,
-                    apiFallback,
-                    diskCache);
+            String selectedProvider = isLlm() ? "custom-api" : provider;
+            if ("custom-api".equalsIgnoreCase(selectedProvider)
+                    && (llmEndpoint.trim().isEmpty() || llmModel.trim().isEmpty())) {
+                throw new IllegalArgumentException(tr("error.universal_translator.llm_required"));
+            }
+            LegacyConfig updated = buildConfig();
             if (updated.enabled && "tencent-hunyuan".equalsIgnoreCase(updated.provider)
                     && (updated.tencentSecretId.isEmpty() || updated.tencentSecretKey.isEmpty())) {
                 throw new IllegalArgumentException(tr("error.universal_translator.tencent_credentials"));
@@ -340,7 +338,8 @@ final class LegacyConfigScreen extends GuiScreen {
     }
 
     private boolean isLlm() {
-        return "openai-compatible".equalsIgnoreCase(provider);
+        return "custom-api".equalsIgnoreCase(provider)
+                || "openai-compatible".equalsIgnoreCase(provider);
     }
 
     private String providerLabel() {
@@ -357,7 +356,7 @@ final class LegacyConfigScreen extends GuiScreen {
             return "tencent-hunyuan";
         }
         if ("tencent-hunyuan".equalsIgnoreCase(current)) {
-            return "openai-compatible";
+            return "custom-api";
         }
         return "offline";
     }
@@ -370,6 +369,73 @@ final class LegacyConfigScreen extends GuiScreen {
 
     String llmApiKey() {
         return llmApiKey;
+    }
+
+    void applyTencentSettings(String secretId, String secretKey, String model) {
+        this.tencentSecretId = secretId;
+        this.tencentSecretKey = secretKey;
+        this.tencentModel = model;
+    }
+
+    String tencentSecretKey() {
+        return tencentSecretKey;
+    }
+
+    private LegacyConfig buildConfig() {
+        String selectedProvider = isLlm() ? "custom-api" : provider;
+        return original.withSettings(
+                enabled,
+                translateChat,
+                translateOther,
+                translateOutgoing,
+                targetLanguage.getText(),
+                outgoingTargetLanguage.getText(),
+                displayMode,
+                translateEnglishOnly,
+                translatedTextColor,
+                selectedProvider,
+                endpoint.getText(),
+                llmEndpoint,
+                llmApiKey,
+                llmModel,
+                offlineAutoDownload,
+                offlineModel,
+                apiFallback,
+                diskCache).withTencentSettings(tencentSecretId, tencentSecretKey, tencentModel);
+    }
+
+    void clearTencentSettings() {
+        this.tencentSecretId = "";
+        this.tencentSecretKey = "";
+        this.tencentModel = "";
+        LegacyConfig cleared = buildConfig();
+        try {
+            cleared.save();
+        } catch (Exception ignored) {
+            // 配置已清空，保存失败时忽略
+        }
+        try {
+            LegacyTranslationRuntime.initialize(cleared);
+        } catch (Exception ignored) {
+            // 运行时将在下次保存时刷新
+        }
+    }
+
+    void clearLlmSettings() {
+        this.llmEndpoint = "";
+        this.llmApiKey = "";
+        this.llmModel = "";
+        LegacyConfig cleared = buildConfig();
+        try {
+            cleared.save();
+        } catch (Exception ignored) {
+            // 配置已清空，保存失败时忽略
+        }
+        try {
+            LegacyTranslationRuntime.initialize(cleared);
+        } catch (Exception ignored) {
+            // 运行时将在下次保存时刷新
+        }
     }
 
     private static String colorLabel(TranslationTextColor color) {

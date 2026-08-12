@@ -8,10 +8,11 @@ import net.minecraft.client.resources.I18n;
 
 import java.io.IOException;
 
-/** OpenAI-compatible LLM settings shared by Forge 1.8.9 and 1.12.2. */
+/** Custom OpenAI-compatible API settings shared by Forge 1.8.9 and 1.12.2. */
 final class LegacyLlmConfigScreen extends GuiScreen {
     private static final int SAVE = 1;
     private static final int CANCEL = 2;
+    private static final int CLEAR = 3;
 
     private final LegacyConfigScreen parent;
     private final String initialEndpoint;
@@ -51,17 +52,24 @@ final class LegacyLlmConfigScreen extends GuiScreen {
         apiKey = new GuiTextField(12, renderer, left, top + 72, fieldWidth, 20);
         apiKey.setMaxStringLength(512);
         int gap = 8;
-        int buttonWidth = (fieldWidth - gap) / 2;
+        int buttonWidth = (fieldWidth - gap * 2) / 3;
         buttonList.add(new GuiButton(SAVE, left, top + 108, buttonWidth, 20,
                 tr("screen.universal_translator.llm.save")));
         buttonList.add(new GuiButton(
                 CANCEL, left + buttonWidth + gap, top + 108, buttonWidth, 20, tr("gui.cancel")));
+        buttonList.add(new GuiButton(
+                CLEAR, left + (buttonWidth + gap) * 2, top + 108, buttonWidth, 20,
+                tr("screen.universal_translator.llm.clear")));
     }
 
     @Override
     protected void actionPerformed(GuiButton button) throws IOException {
         if (button.id == CANCEL) {
             mc.displayGuiScreen(parent);
+            return;
+        }
+        if (button.id == CLEAR) {
+            clearAll();
             return;
         }
         if (button.id != SAVE) {
@@ -74,8 +82,7 @@ final class LegacyLlmConfigScreen extends GuiScreen {
             return;
         }
         String enteredKey = apiKey.getText().trim();
-        String keyValue = enteredKey.isEmpty()
-                ? parent.llmApiKey() : ("-".equals(enteredKey) ? "" : enteredKey);
+        String keyValue = enteredKey.isEmpty() ? parent.llmApiKey() : enteredKey;
         parent.applyLlmSettings(endpointValue, modelValue, keyValue);
         mc.displayGuiScreen(parent);
     }
@@ -112,16 +119,17 @@ final class LegacyLlmConfigScreen extends GuiScreen {
         int left = (width - fieldWidth) / 2;
         int top = Math.max(42, (height - 150) / 2);
         drawCenteredString(renderer, tr("screen.universal_translator.llm.title"), width / 2, 18, 0xFFFFFF);
-        drawString(renderer, tr("screen.universal_translator.llm.endpoint_hint"), left, top - 11, 0xA0A0A0);
-        drawString(renderer, tr("screen.universal_translator.llm.model_hint"), left, top + 25, 0xA0A0A0);
-        drawString(renderer,
-                tr(hasStoredKey
-                        ? "screen.universal_translator.llm.key_saved_hint"
-                        : "screen.universal_translator.llm.key_empty_hint"),
-                left, top + 61, 0xA0A0A0);
+        drawString(renderer, tr("screen.universal_translator.llm.endpoint"), left, top - 11, 0xFFFFFF);
+        drawString(renderer, tr("screen.universal_translator.llm.model"), left, top + 25, 0xFFFFFF);
+        drawString(renderer, tr("screen.universal_translator.llm.api_key"), left, top + 61, 0xFFFFFF);
         endpoint.drawTextBox();
         model.drawTextBox();
         apiKey.drawTextBox();
+        drawPlaceholder(endpoint, tr("screen.universal_translator.llm.endpoint_hint"), left, top);
+        drawPlaceholder(model, tr("screen.universal_translator.llm.model_hint"), left, top + 36);
+        drawPlaceholder(apiKey, tr(hasStoredKey
+                ? "screen.universal_translator.llm.key_saved_hint"
+                : "screen.universal_translator.llm.key_empty_hint"), left, top + 72);
         if (!status.isEmpty()) {
             drawCenteredString(renderer, status, width / 2, top + 134, 0xFF5555);
         }
@@ -133,7 +141,21 @@ final class LegacyLlmConfigScreen extends GuiScreen {
         return false;
     }
 
+    private void drawPlaceholder(GuiTextField field, String text, int x, int y) {
+        if (field.getText().isEmpty()) {
+            drawString(renderer, text, x + 4, y + 6, 0xA0A0A0);
+        }
+    }
+
     private static String tr(String key, Object... arguments) {
         return I18n.format(key, arguments);
+    }
+
+    private void clearAll() {
+        endpoint.setText("");
+        model.setText("");
+        apiKey.setText("");
+        parent.clearLlmSettings();
+        mc.displayGuiScreen(parent);
     }
 }

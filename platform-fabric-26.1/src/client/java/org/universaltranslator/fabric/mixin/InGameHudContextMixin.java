@@ -3,11 +3,14 @@ package org.universaltranslator.fabric.mixin;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.universaltranslator.core.TextKind;
+import org.universaltranslator.fabric.RenderedTextBridge;
+import org.universaltranslator.fabric.TranslationLogOverlay;
 import org.universaltranslator.fabric.TranslationRenderContext;
 
 @Mixin(Gui.class)
@@ -76,12 +79,18 @@ abstract class InGameHudContextMixin {
         TranslationRenderContext.pop();
     }
 
+    @Inject(method = "setOverlayMessage", at = @At("HEAD"))
+    private void universalTranslator$preloadActionBar(
+            Component message, boolean tinted, CallbackInfo callback) {
+        RenderedTextBridge.preloadUrgentHudText(message, TextKind.ACTION_BAR, tinted);
+    }
+
     @Inject(
             method = "extractOverlayMessage(Lnet/minecraft/client/gui/GuiGraphicsExtractor;Lnet/minecraft/client/DeltaTracker;)V",
             at = @At("HEAD"))
-    private void universalTranslator$enterActionBar(
+    private void universalTranslator$enterItemNameOverlay(
             GuiGraphicsExtractor graphics, DeltaTracker deltaTracker, CallbackInfo callback) {
-        TranslationRenderContext.push(TextKind.ACTION_BAR);
+        TranslationRenderContext.push(TextKind.ITEM_NAME);
     }
 
     @Inject(
@@ -90,5 +99,6 @@ abstract class InGameHudContextMixin {
     private void universalTranslator$leaveActionBar(
             GuiGraphicsExtractor graphics, DeltaTracker deltaTracker, CallbackInfo callback) {
         TranslationRenderContext.pop();
+        TranslationLogOverlay.extract(graphics);
     }
 }

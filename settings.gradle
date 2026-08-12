@@ -1,7 +1,17 @@
 pluginManagement {
     repositories {
+        maven { url = "https://maven.aliyun.com/repository/gradle-plugin" }
+        maven { url = "https://maven.aliyun.com/repository/public" }
         maven { url = "https://maven.fabricmc.net/" }
         gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        maven { url = "https://maven.aliyun.com/repository/public" }
+        maven { url = "https://maven.fabricmc.net/" }
+        mavenCentral()
     }
 }
 

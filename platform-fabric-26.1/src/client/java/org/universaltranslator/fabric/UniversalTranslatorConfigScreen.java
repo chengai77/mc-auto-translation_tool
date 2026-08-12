@@ -30,6 +30,9 @@ final class UniversalTranslatorConfigScreen extends Screen {
     private String llmEndpoint;
     private String llmApiKey;
     private String llmModel;
+    private String tencentSecretId;
+    private String tencentSecretKey;
+    private String tencentModel;
     private EditBox targetLanguage;
     private EditBox outgoingTargetLanguage;
     private EditBox endpoint;
@@ -68,6 +71,9 @@ final class UniversalTranslatorConfigScreen extends Screen {
         this.llmEndpoint = config.llmEndpoint;
         this.llmApiKey = config.llmApiKey;
         this.llmModel = config.llmModel;
+        this.tencentSecretId = config.tencentSecretId;
+        this.tencentSecretKey = config.tencentSecretKey;
+        this.tencentModel = config.tencentModel;
     }
 
     @Override
@@ -118,6 +124,11 @@ final class UniversalTranslatorConfigScreen extends Screen {
                 if (this.minecraft != null) {
                     this.minecraft.setScreen(new UniversalTranslatorLlmConfigScreen(
                             this, llmEndpoint, llmModel, !llmApiKey.isEmpty()));
+                }
+            } else if (isTencent()) {
+                if (this.minecraft != null) {
+                    this.minecraft.setScreen(new UniversalTranslatorTencentConfigScreen(
+                            this, tencentSecretId, tencentModel, !tencentSecretKey.isEmpty()));
                 }
             } else {
                 offlineAutoDownload = !offlineAutoDownload;
@@ -186,13 +197,15 @@ final class UniversalTranslatorConfigScreen extends Screen {
         colorButton.setMessage(Component.translatable("screen.universal_translator.option.color", colorLabel(translatedTextColor)));
         downloadButton.setMessage(isLlm()
                 ? Component.translatable("screen.universal_translator.option.llm_settings")
-                : Component.translatable("screen.universal_translator.option.download", onOff(offlineAutoDownload)));
+                : (isTencent()
+                ? Component.translatable("screen.universal_translator.option.tencent_settings")
+                : Component.translatable("screen.universal_translator.option.download", onOff(offlineAutoDownload))));
         modelButton.setMessage(Component.translatable("screen.universal_translator.option.model", offlineModel.displayName()));
         fallbackButton.setMessage(Component.translatable("screen.universal_translator.option.fallback", onOff(apiFallback)));
         outgoingButton.setMessage(Component.translatable("screen.universal_translator.option.outgoing", onOff(translateOutgoing)));
         targetLanguageButton.setMessage(Component.translatable("screen.universal_translator.option.target_preset",
                 TargetLanguage.displayName(targetLanguage.getValue())));
-        downloadButton.active = isOffline() || isLlm();
+        downloadButton.active = isOffline() || isLlm() || isTencent();
         modelButton.active = isOffline();
         fallbackButton.active = isOffline();
     }
@@ -214,25 +227,12 @@ final class UniversalTranslatorConfigScreen extends Screen {
             if (translateOutgoing && outgoingTargetLanguage.getValue().trim().isEmpty()) {
                 throw new IllegalArgumentException(tr("error.universal_translator.outgoing_target_required"));
             }
-            FabricConfig updated = original.withSettings(
-                    enabled,
-                    translateChat,
-                    translateOther,
-                    translateOutgoing,
-                    targetLanguage.getValue(),
-                    outgoingTargetLanguage.getValue(),
-                    displayMode,
-                    translateEnglishOnly,
-                    translatedTextColor,
-                    provider,
-                    endpoint.getValue(),
-                    llmEndpoint,
-                    llmApiKey,
-                    llmModel,
-                    offlineAutoDownload,
-                    offlineModel,
-                    apiFallback,
-                    diskCache);
+            String selectedProvider = isLlm() ? "custom-api" : provider;
+            if ("custom-api".equalsIgnoreCase(selectedProvider)
+                    && (llmEndpoint.trim().isEmpty() || llmModel.trim().isEmpty())) {
+                throw new IllegalArgumentException(tr("error.universal_translator.llm_required"));
+            }
+            FabricConfig updated = buildConfig();
             if (updated.enabled && "tencent-hunyuan".equalsIgnoreCase(updated.provider)
                     && (updated.tencentSecretId.isEmpty() || updated.tencentSecretKey.isEmpty())) {
                 throw new IllegalArgumentException(tr("error.universal_translator.tencent_credentials"));
@@ -318,7 +318,8 @@ final class UniversalTranslatorConfigScreen extends Screen {
     }
 
     private boolean isLlm() {
-        return "openai-compatible".equalsIgnoreCase(provider);
+        return "custom-api".equalsIgnoreCase(provider)
+                || "openai-compatible".equalsIgnoreCase(provider);
     }
 
     private String providerLabel() {
@@ -335,7 +336,7 @@ final class UniversalTranslatorConfigScreen extends Screen {
             return "tencent-hunyuan";
         }
         if ("tencent-hunyuan".equalsIgnoreCase(current)) {
-            return "openai-compatible";
+            return "custom-api";
         }
         return "offline";
     }
@@ -348,6 +349,73 @@ final class UniversalTranslatorConfigScreen extends Screen {
 
     String llmApiKey() {
         return llmApiKey;
+    }
+
+    void applyTencentSettings(String secretId, String secretKey, String model) {
+        this.tencentSecretId = secretId;
+        this.tencentSecretKey = secretKey;
+        this.tencentModel = model;
+    }
+
+    String tencentSecretKey() {
+        return tencentSecretKey;
+    }
+
+    private FabricConfig buildConfig() {
+        String selectedProvider = isLlm() ? "custom-api" : provider;
+        return original.withSettings(
+                enabled,
+                translateChat,
+                translateOther,
+                translateOutgoing,
+                targetLanguage.getValue(),
+                outgoingTargetLanguage.getValue(),
+                displayMode,
+                translateEnglishOnly,
+                translatedTextColor,
+                selectedProvider,
+                endpoint.getValue(),
+                llmEndpoint,
+                llmApiKey,
+                llmModel,
+                offlineAutoDownload,
+                offlineModel,
+                apiFallback,
+                diskCache).withTencentSettings(tencentSecretId, tencentSecretKey, tencentModel);
+    }
+
+    void clearTencentSettings() {
+        this.tencentSecretId = "";
+        this.tencentSecretKey = "";
+        this.tencentModel = "";
+        FabricConfig cleared = buildConfig();
+        try {
+            cleared.save();
+        } catch (Exception ignored) {
+            // 配置已清空，保存失败时忽略
+        }
+        try {
+            FabricTranslationRuntime.initialize(cleared);
+        } catch (Exception ignored) {
+            // 运行时将在下次保存时刷新
+        }
+    }
+
+    void clearLlmSettings() {
+        this.llmEndpoint = "";
+        this.llmApiKey = "";
+        this.llmModel = "";
+        FabricConfig cleared = buildConfig();
+        try {
+            cleared.save();
+        } catch (Exception ignored) {
+            // 配置已清空，保存失败时忽略
+        }
+        try {
+            FabricTranslationRuntime.initialize(cleared);
+        } catch (Exception ignored) {
+            // 运行时将在下次保存时刷新
+        }
     }
 
     private static String colorLabel(TranslationTextColor color) {

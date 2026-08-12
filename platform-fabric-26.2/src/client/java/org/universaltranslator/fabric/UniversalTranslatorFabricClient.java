@@ -32,6 +32,12 @@ public final class UniversalTranslatorFabricClient implements ClientModInitializ
                     InputConstants.Type.KEYSYM,
                     GLFW.GLFW_KEY_F8,
                     KeyMapping.Category.MISC));
+    private static final KeyMapping OPEN_TRANSLATION_LOG = KeyMappingHelper.registerKeyMapping(
+            new KeyMapping(
+                    "key.universal_translator.open_translation_log",
+                    InputConstants.Type.KEYSYM,
+                    GLFW.GLFW_KEY_I,
+                    KeyMapping.Category.MISC));
     private static boolean connectedLastTick;
     private static int joinHintTicks = -1;
     private static String lastRuntimeStatus = "";
@@ -51,6 +57,7 @@ public final class UniversalTranslatorFabricClient implements ClientModInitializ
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             boolean connected = client.level != null && client.getConnection() != null;
             if (connected && !connectedLastTick) {
+                TranslationLog.clear();
                 joinHintTicks = 60;
             } else if (!connected) {
                 joinHintTicks = -1;
@@ -94,6 +101,11 @@ public final class UniversalTranslatorFabricClient implements ClientModInitializ
                 }
             }
             notifyRuntimeStatus(client, connected);
+            while (OPEN_TRANSLATION_LOG.consumeClick()) {
+                if (!(client.gui.screen() instanceof TranslationLogScreen)) {
+                    client.gui.setScreen(new TranslationLogScreen(client.gui.screen()));
+                }
+            }
             while (OPEN_SETTINGS.consumeClick()) {
                 if (client.gui.screen() instanceof UniversalTranslatorConfigScreen) {
                     continue;

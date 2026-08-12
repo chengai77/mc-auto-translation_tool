@@ -15,7 +15,8 @@ import java.util.Map;
 import java.util.Properties;
 
 /**
- * Small disk cache that hashes source/cache keys before persistence. Translated values remain local.
+ * Small disk cache that hashes source/cache keys before persistence. Translated values are
+ * saved locally as plain UTF-8 text so repeated/restarted sessions can render them immediately.
  * Disk write failures never break translation and the in-memory value remains usable.
  */
 public final class PersistentTranslationCache implements TranslationStore {

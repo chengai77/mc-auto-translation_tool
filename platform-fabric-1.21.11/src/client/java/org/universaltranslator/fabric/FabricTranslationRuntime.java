@@ -1,6 +1,7 @@
 package org.universaltranslator.fabric;
 
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.text.Text;
 import org.universaltranslator.core.RenderTranslationSession;
 import org.universaltranslator.core.PersistentTranslationCache;
 import org.universaltranslator.core.TextKind;
@@ -34,6 +35,7 @@ final class FabricTranslationRuntime {
     private static volatile long protectedPlayerNamesExpireAt;
     private static final RecentUserText RECENT_USER_TEXT = new RecentUserText();
     private static CompletableFuture<Void> outgoingTail = CompletableFuture.completedFuture(null);
+    private static volatile boolean replayingUrgentHudText;
 
     private FabricTranslationRuntime() {
     }
@@ -49,12 +51,20 @@ final class FabricTranslationRuntime {
         TranslationStore store = config.diskCache
                 ? new PersistentTranslationCache(config.cacheFile, 10_000)
                 : new TranslationCache(10_000);
-        int workers = provider.id().contains("offline-llama:") ? 1 : 2;
+        int workers = provider.id().contains("offline-llama:") ? 1 : 4;
         RenderTranslationSession created = new RenderTranslationSession(
                 provider, "auto", config.targetLanguage, store, workers, config.displayMode,
                 config.translateEnglishOnly);
         created.setProtectedLiteralsSupplier(FabricTranslationRuntime::playerNameSnapshot);
         session = created;
+    }
+
+    static FabricConfig currentConfig() {
+        return activeConfig;
+    }
+
+    static synchronized void updateConfig(FabricConfig config) throws IOException {
+        initialize(config);
     }
 
     static String translateForRender(String original, TextKind kind) {
@@ -64,12 +74,74 @@ final class FabricTranslationRuntime {
         if (active == null || config == null || !config.allows(kind)
                 || client.currentScreen instanceof UniversalTranslatorConfigScreen
                 || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
+                || client.currentScreen instanceof TranslationLogScreen
                 || FabricLocalTextGuard.isLocalChatInput(client, original)
                 || RECENT_USER_TEXT.shouldPreserve(original)
                 || client.world == null || client.getNetworkHandler() == null) {
             return original;
         }
-        return active.lookup(original, kind);
+        String translated = active.lookup(original, kind);
+        if (shouldRecordInLog(kind)) {
+            TranslationLog.add(original, displayTranslatedOnly(translated));
+        }
+        return translated;
+    }
+
+    static void preloadUrgentHudText(Text text, TextKind kind, boolean overlayTinted) {
+        RenderTranslationSession active = session;
+        FabricConfig config = activeConfig;
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (text == null || replayingUrgentHudText || active == null || config == null
+                || !config.allows(kind)
+                || client.world == null || client.getNetworkHandler() == null) {
+            return;
+        }
+        final String original = text.getString();
+        if (original == null || original.trim().isEmpty()
+                || RECENT_USER_TEXT.shouldPreserve(original)) {
+            return;
+        }
+        active.translateInteractive(original, kind, config.targetLanguage, config.translateEnglishOnly)
+                .thenAccept(result -> {
+                    if (result == null || !result.isTranslated()) {
+                        return;
+                    }
+                    String translated = result.getTranslatedText();
+                    if (translated == null || translated.equals(original)) {
+                        return;
+                    }
+                    client.execute(() -> replayUrgentHudText(kind,
+                            Text.literal(translated).setStyle(text.getStyle()), overlayTinted));
+                });
+    }
+
+    private static void replayUrgentHudText(TextKind kind, Text translated, boolean overlayTinted) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.world == null || client.inGameHud == null) {
+            return;
+        }
+        replayingUrgentHudText = true;
+        try {
+            if (kind == TextKind.ACTION_BAR) {
+                client.inGameHud.setOverlayMessage(translated, overlayTinted);
+            } else if (kind == TextKind.SUBTITLE) {
+                client.inGameHud.setSubtitle(translated);
+                client.inGameHud.setTitleTicks(0, 60, 10);
+            } else if (kind == TextKind.TITLE) {
+                client.inGameHud.setTitle(translated);
+                client.inGameHud.setTitleTicks(0, 60, 10);
+            }
+        } finally {
+            replayingUrgentHudText = false;
+        }
+    }
+
+    static void clearTranslationHistory() {
+        TranslationLog.clear();
+        RenderTranslationSession active = session;
+        if (active != null) {
+            active.clearRenderedTranslations();
+        }
     }
 
     static synchronized void shutdown() {
@@ -175,16 +247,58 @@ final class FabricTranslationRuntime {
         if (active == null || config == null || !config.allows(kind)
                 || client.currentScreen instanceof UniversalTranslatorConfigScreen
                 || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
+                || client.currentScreen instanceof TranslationLogScreen
                 || TranslationRenderContext.isTextInput()
                 || client.world == null || client.getNetworkHandler() == null) {
             return originals;
         }
-        return active.lookupLines(originals, kind);
+        List<String> translated = active.lookupLines(originals, kind);
+        if (shouldRecordInLog(kind)) {
+            TranslationLog.add(joinLogLines(originals), displayTranslatedOnly(joinLogLines(translated)));
+        }
+        return translated;
+    }
+
+    private static boolean shouldRecordInLog(TextKind kind) {
+        FabricConfig config = activeConfig;
+        if (config == null
+                || kind == TextKind.TOOLTIP
+                || kind == TextKind.ITEM_NAME
+                || kind == TextKind.ITEM_LORE) {
+            return false;
+        }
+        return config.logAllowedKinds.contains(kind);
+    }
+
+    private static String joinLogLines(List<String> values) {
+        StringBuilder joined = new StringBuilder();
+        for (String value : values) {
+            if (value == null) {
+                continue;
+            }
+            String normalized = value.replace('\n', ' ').replace('\r', ' ').trim();
+            if (normalized.isEmpty()) {
+                continue;
+            }
+            if (joined.length() > 0) {
+                joined.append(' ');
+            }
+            joined.append(normalized);
+        }
+        return joined.toString();
     }
 
     static TranslationTextColor translatedTextColor() {
         FabricConfig config = activeConfig;
         return config == null ? TranslationTextColor.ORIGINAL : config.translatedTextColor;
+    }
+
+    private static String displayTranslatedOnly(String value) {
+        if (value == null) {
+            return "";
+        }
+        int separator = value.indexOf("\n");
+        return separator >= 0 ? value.substring(separator + 1) : value;
     }
 
     static void protectOutgoingMessage(String message) {

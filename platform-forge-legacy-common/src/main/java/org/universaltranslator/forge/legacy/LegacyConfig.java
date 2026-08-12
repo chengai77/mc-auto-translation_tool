@@ -77,10 +77,9 @@ final class LegacyConfig {
         tencentSecretKey = properties.getProperty("tencent-secret-key", "").trim();
         tencentModel = properties.getProperty(
                 "tencent-model", "hunyuan-translation-lite").trim();
-        llmEndpoint = properties.getProperty(
-                "llm-api-endpoint", "http://127.0.0.1:8080/v1/chat/completions").trim();
+        llmEndpoint = properties.getProperty("llm-api-endpoint", "").trim();
         llmApiKey = properties.getProperty("llm-api-key", "").trim();
-        llmModel = properties.getProperty("llm-api-model", "local-model").trim();
+        llmModel = properties.getProperty("llm-api-model", "").trim();
         offlineAutoDownload = Boolean.parseBoolean(
                 properties.getProperty("offline-auto-download", "true"));
         offlineModel = OfflineModel.fromConfig(properties.getProperty("offline-model", "lite"));
@@ -173,6 +172,14 @@ final class LegacyConfig {
         return new LegacyConfig(properties, configFile, cacheFile);
     }
 
+    LegacyConfig withTencentSettings(String secretId, String secretKey, String model) {
+        Properties properties = toProperties();
+        properties.setProperty("tencent-secret-id", secretId == null ? "" : secretId);
+        properties.setProperty("tencent-secret-key", secretKey == null ? "" : secretKey);
+        properties.setProperty("tencent-model", model == null ? "hunyuan-translation-lite" : model);
+        return new LegacyConfig(properties, configFile, cacheFile);
+    }
+
     LegacyConfig withEnabled(boolean enabled) {
         Properties properties = toProperties();
         properties.setProperty("enabled", Boolean.toString(enabled));
@@ -243,11 +250,16 @@ final class LegacyConfig {
         if ("tencent-hunyuan".equalsIgnoreCase(selectedProvider)) {
             return new TencentHunyuanProvider(tencentSecretId, tencentSecretKey, tencentModel);
         }
-        if ("openai-compatible".equalsIgnoreCase(selectedProvider)) {
+        if (isCustomApiProvider(selectedProvider)) {
             return new OpenAiChatTranslationProvider(
-                    llmEndpoint, llmApiKey, llmModel, "openai-compatible");
+                    llmEndpoint, llmApiKey, llmModel, "custom-api");
         }
         throw new IllegalArgumentException("Unsupported translation provider: " + selectedProvider);
+    }
+
+    private static boolean isCustomApiProvider(String selectedProvider) {
+        return "custom-api".equalsIgnoreCase(selectedProvider)
+                || "openai-compatible".equalsIgnoreCase(selectedProvider);
     }
 
     private static Properties defaults() {
@@ -268,9 +280,9 @@ final class LegacyConfig {
         properties.setProperty("tencent-secret-id", "");
         properties.setProperty("tencent-secret-key", "");
         properties.setProperty("tencent-model", "hunyuan-translation-lite");
-        properties.setProperty("llm-api-endpoint", "http://127.0.0.1:8080/v1/chat/completions");
+        properties.setProperty("llm-api-endpoint", "");
         properties.setProperty("llm-api-key", "");
-        properties.setProperty("llm-api-model", "local-model");
+        properties.setProperty("llm-api-model", "");
         properties.setProperty("offline-auto-download", "true");
         properties.setProperty("offline-model", "lite");
         properties.setProperty("api-fallback", "false");

@@ -3,15 +3,40 @@ package org.universaltranslator.fabric.mixin;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.hud.InGameHud;
 import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.text.Text;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.universaltranslator.core.TextKind;
+import org.universaltranslator.fabric.RenderedTextBridge;
+import org.universaltranslator.fabric.TranslationLogOverlay;
 import org.universaltranslator.fabric.TranslationRenderContext;
 
 @Mixin(InGameHud.class)
 abstract class InGameHudContextMixin {
+    @Inject(method = "render", at = @At("RETURN"))
+    private void universalTranslator$renderPinnedLog(
+            DrawContext context, RenderTickCounter tickCounter, CallbackInfo callback) {
+        TranslationLogOverlay.render(context, 0.0F);
+    }
+
+    @Inject(method = "setTitle", at = @At("HEAD"))
+    private void universalTranslator$preloadTitle(Text title, CallbackInfo callback) {
+        RenderedTextBridge.preloadUrgentHudText(title, TextKind.TITLE, false);
+    }
+
+    @Inject(method = "setSubtitle", at = @At("HEAD"))
+    private void universalTranslator$preloadSubtitle(Text subtitle, CallbackInfo callback) {
+        RenderedTextBridge.preloadUrgentHudText(subtitle, TextKind.SUBTITLE, false);
+    }
+
+    @Inject(method = "setOverlayMessage", at = @At("HEAD"))
+    private void universalTranslator$preloadOverlayMessage(
+            Text message, boolean tinted, CallbackInfo callback) {
+        RenderedTextBridge.preloadUrgentHudText(message, TextKind.ACTION_BAR, tinted);
+    }
+
     @Inject(method = "renderChat", at = @At("HEAD"))
     private void universalTranslator$enterChat(
             DrawContext context, RenderTickCounter tickCounter, CallbackInfo callback) {
@@ -65,9 +90,9 @@ abstract class InGameHudContextMixin {
     }
 
     @Inject(method = "renderOverlayMessage", at = @At("HEAD"))
-    private void universalTranslator$enterActionBar(
+    private void universalTranslator$enterItemNameOverlay(
             DrawContext context, RenderTickCounter tickCounter, CallbackInfo callback) {
-        TranslationRenderContext.push(TextKind.ACTION_BAR);
+        TranslationRenderContext.push(TextKind.ITEM_NAME);
     }
 
     @Inject(method = "renderOverlayMessage", at = @At("RETURN"))

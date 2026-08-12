@@ -3,6 +3,8 @@
   "package": "org.universaltranslator.fabric.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "ChatInputSuggestorMixin",
+    "DebugHudMixin",
     "DrawContextMixin",
     "ScreenMixin",
     "SignEditScreenMixin",

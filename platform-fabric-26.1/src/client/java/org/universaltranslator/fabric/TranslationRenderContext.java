@@ -16,6 +16,8 @@ public final class TranslationRenderContext {
             };
     private static final ThreadLocal<Integer> TEXT_INPUT_DEPTH =
             new ThreadLocal<Integer>();
+    private static final ThreadLocal<Integer> SUPPRESS_TRANSLATION_DEPTH =
+            new ThreadLocal<Integer>();
 
     private TranslationRenderContext() {
     }
@@ -56,6 +58,25 @@ public final class TranslationRenderContext {
 
     public static boolean isTextInput() {
         Integer depth = TEXT_INPUT_DEPTH.get();
+        return depth != null && depth > 0;
+    }
+
+    public static void pushSuppressTranslation() {
+        Integer depth = SUPPRESS_TRANSLATION_DEPTH.get();
+        SUPPRESS_TRANSLATION_DEPTH.set(depth == null ? 1 : depth + 1);
+    }
+
+    public static void popSuppressTranslation() {
+        Integer depth = SUPPRESS_TRANSLATION_DEPTH.get();
+        if (depth == null || depth <= 1) {
+            SUPPRESS_TRANSLATION_DEPTH.remove();
+        } else {
+            SUPPRESS_TRANSLATION_DEPTH.set(depth - 1);
+        }
+    }
+
+    public static boolean isTranslationSuppressed() {
+        Integer depth = SUPPRESS_TRANSLATION_DEPTH.get();
         return depth != null && depth > 0;
     }
 }

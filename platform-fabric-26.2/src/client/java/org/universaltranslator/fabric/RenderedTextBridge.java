@@ -43,6 +43,10 @@ public final class RenderedTextBridge {
         return Component.literal(translated).setStyle(translatedStyle(text.getStyle()));
     }
 
+    public static void preloadUrgentHudText(Component text, TextKind kind, boolean overlayTinted) {
+        FabricTranslationRuntime.preloadUrgentHudText(text, kind, overlayTinted);
+    }
+
     public static FormattedCharSequence translate(FormattedCharSequence text) {
         if (text == null) {
             return null;
@@ -126,7 +130,8 @@ public final class RenderedTextBridge {
     }
 
     private static String translateRaw(String text) {
-        if (TranslationRenderContext.isTextInput()) {
+        if (TranslationRenderContext.isTextInput()
+                || TranslationRenderContext.isTranslationSuppressed()) {
             return text;
         }
         return FabricTranslationRuntime.translateForRender(

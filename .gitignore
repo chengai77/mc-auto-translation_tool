@@ -7,6 +7,7 @@ run/
 *.iml
 *.log
 .DS_Store
+上下文.txt
 .env
 .env.*
 !.env.example

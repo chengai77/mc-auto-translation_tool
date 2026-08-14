@@ -54,6 +54,11 @@ final class LegacyTranslationRuntime {
                     provider, "auto", config.targetLanguage, store, workers, config.displayMode,
                     config.translateEnglishOnly);
             created.setProtectedLiteralsSupplier(LegacyTranslationRuntime::playerNameSnapshot);
+            created.setRenderCompletionListener((kind, output) -> {
+                if (kind == TextKind.CHAT || kind == TextKind.SYSTEM_MESSAGE) {
+                    LegacyVersionAccess.refreshChatAsync(Minecraft.getMinecraft());
+                }
+            });
             session = created;
         }
     }
@@ -181,6 +186,20 @@ final class LegacyTranslationRuntime {
             return originals;
         }
         return active.lookupLines(originals, kind);
+    }
+
+    static List<String> translateIndependentLines(List<String> originals, TextKind kind) {
+        RenderTranslationSession active = session;
+        LegacyConfig config = activeConfig;
+        Minecraft minecraft = Minecraft.getMinecraft();
+        if (active == null || config == null || !config.allows(kind)
+                || minecraft.currentScreen instanceof LegacyConfigScreen
+                || minecraft.currentScreen instanceof LegacyDiagnosticsScreen
+                || LegacyRenderContext.isTextInput()
+                || LegacyVersionAccess.connection(minecraft) == null) {
+            return originals;
+        }
+        return active.lookupIndependentLines(originals, kind);
     }
 
     static TranslationTextColor translatedTextColor() {

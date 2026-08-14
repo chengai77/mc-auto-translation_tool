@@ -6,7 +6,6 @@ import java.util.Collections;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import java.util.function.BiConsumer;
@@ -47,6 +46,7 @@ public final class RenderTranslationSession implements AutoCloseable {
     private volatile boolean closed;
     private volatile String lastFailureStatus = "";
     private volatile BiConsumer<TextKind, String> urgentCompletionListener;
+    private volatile BiConsumer<TextKind, String> renderCompletionListener;
     private volatile Supplier<? extends Iterable<String>> protectedLiterals =
             new Supplier<Iterable<String>>() {
                 @Override
@@ -124,14 +124,43 @@ public final class RenderTranslationSession implements AutoCloseable {
             return original;
         }
         TextKind effectiveKind = kind == null ? TextKind.OTHER : kind;
-        VisualLineGroup group = visualLineGrouper.group(original, effectiveKind);
-        if (group != null) {
-            String grouped = lookupDirect(group.text, effectiveKind);
-            if (!group.text.equals(grouped)) {
-                return group.lineResult(grouped);
+        if (effectiveKind == TextKind.BOOK && VisualTextBoundaries.hasSeparatorLine(original)) {
+            return lookupLineAwareText(original, effectiveKind);
+        }
+        if (allowsVisualGrouping(effectiveKind)) {
+            VisualLineGroup group = visualLineGrouper.group(original, effectiveKind);
+            if (group != null) {
+                String grouped = lookupDirect(group.text, effectiveKind);
+                if (!group.text.equals(grouped)) {
+                    return group.lineResult(grouped);
+                }
+                return original;
             }
         }
+        RenderKey directKey = new RenderKey(original, effectiveKind);
+        String directReady = translated.get(directKey);
+        if (directReady != null) {
+            return directReady;
+        }
+        TranslationResult directCached = coordinator.cachedTranslation(
+                original, sourceLanguage, targetLanguage, effectiveKind,
+                Collections.<String>emptyList(), preserveHanText);
+        if (directCached != null) {
+            completeLookup(directKey, original, directCached, null);
+            return renderResult(original, directCached);
+        }
         return lookupDirect(original, effectiveKind);
+    }
+
+    private static boolean allowsVisualGrouping(TextKind kind) {
+        return kind == TextKind.TITLE
+                || kind == TextKind.SUBTITLE
+                || kind == TextKind.ACTION_BAR
+                || kind == TextKind.SCOREBOARD_TITLE
+                || kind == TextKind.SCOREBOARD_LINE
+                || kind == TextKind.BOSS_BAR
+                || kind == TextKind.HOLOGRAM
+                || kind == TextKind.BOOK;
     }
 
     private String lookupDirect(String original, TextKind effectiveKind) {
@@ -182,25 +211,116 @@ public final class RenderTranslationSession implements AutoCloseable {
 
     /**
      * Translates related visual lines as one semantic text. Minecraft often wraps one
-     * sentence into multiple render lines (chat, signs, books, tooltips); those wraps
-     * must not become translation boundaries.
+     * sentence into multiple render lines (chat, signs, books); those wraps must not
+     * become translation boundaries.
      */
     public List<String> lookupLines(List<String> originals, TextKind kind) {
         if (originals == null || originals.isEmpty()) {
             return originals;
         }
+        if (usesIndependentLineTranslation(kind)) {
+            return lookupIndependentLines(originals, kind);
+        }
+        if (preservesSeparatorBoundaries(kind)) {
+            List<String> separated = lookupWithSeparatorBoundaries(originals, kind);
+            if (separated != null) {
+                return separated;
+            }
+        }
+        return lookupJoinedLines(originals, kind);
+    }
+
+    private List<String> lookupJoinedLines(List<String> originals, TextKind kind) {
+        return lookupJoinedLines(originals, kind, false);
+    }
+
+    private List<String> lookupJoinedLines(List<String> originals, TextKind kind, boolean direct) {
         String originalText = joinVisualLines(originals);
         if (originalText.isEmpty()) {
             return originals;
         }
-        String translatedText = lookup(originalText, kind);
+        String translatedText = direct ? lookupDirect(originalText, kind) : lookup(originalText, kind);
         if (originalText.equals(translatedText)) {
             return originals;
+        }
+        if (kind == TextKind.HOLOGRAM) {
+            return distributeHologramBlocks(originals, translatedText);
+        }
+        if (preservesLineBoundaries(kind)) {
+            return distributeLineBounded(originals, translatedText);
         }
         return distributeVisualLines(originals, translatedText);
     }
 
+    private String lookupLineAwareText(String original, TextKind kind) {
+        List<String> lines = VisualTextBoundaries.splitLines(original);
+        List<String> translatedLines = lookupLines(lines, kind);
+        if (translatedLines.equals(lines)) {
+            return original;
+        }
+        return joinWithNewlines(translatedLines);
+    }
+
+    private List<String> lookupWithSeparatorBoundaries(List<String> originals, TextKind kind) {
+        if (!VisualTextBoundaries.hasSeparatorLine(originals)) {
+            return null;
+        }
+        List<String> result = new ArrayList<String>(originals.size());
+        int index = 0;
+        while (index < originals.size()) {
+            String line = originals.get(index);
+            if (VisualTextBoundaries.isSeparatorLine(line)) {
+                result.add(line);
+                index++;
+                continue;
+            }
+            int start = index;
+            while (index < originals.size()
+                    && !VisualTextBoundaries.isSeparatorLine(originals.get(index))) {
+                index++;
+            }
+            result.addAll(lookupJoinedLines(
+                    new ArrayList<String>(originals.subList(start, index)), kind, true));
+        }
+        return result.equals(originals) ? originals : result;
+    }
+
+    public List<String> lookupIndependentLines(List<String> originals, TextKind kind) {
+        if (originals == null || originals.isEmpty()) {
+            return originals;
+        }
+        List<String> translatedLines = null;
+        for (int index = 0; index < originals.size(); index++) {
+            String original = originals.get(index);
+            String translatedLine = lookup(original, kind);
+            if (original == null ? translatedLine != null : !original.equals(translatedLine)) {
+                if (translatedLines == null) {
+                    translatedLines = new ArrayList<String>(originals);
+                }
+                translatedLines.set(index, translatedLine);
+            }
+        }
+        return translatedLines == null ? originals : translatedLines;
+    }
+
+    private static boolean preservesLineBoundaries(TextKind kind) {
+        return false;
+    }
+
+    private static boolean preservesSeparatorBoundaries(TextKind kind) {
+        return kind == TextKind.SIGN || kind == TextKind.BOOK;
+    }
+
+    private static boolean usesIndependentLineTranslation(TextKind kind) {
+        return kind == TextKind.TOOLTIP
+                || kind == TextKind.ITEM_LORE;
+    }
+
     private static String joinVisualLines(List<String> lines) {
+        return joinVisualLines(lines, false);
+    }
+
+    private static String joinVisualLines(List<String> lines, boolean preserveLineBoundaries) {
         StringBuilder joined = new StringBuilder();
         for (String line : lines) {
             if (line == null) {
@@ -210,10 +330,81 @@ public final class RenderTranslationSession implements AutoCloseable {
             if (normalized.isEmpty()) {
                 continue;
             }
-            if (joined.length() > 0 && needsSpace(joined.charAt(joined.length() - 1), normalized.charAt(0))) {
-                joined.append(' ');
+            if (joined.length() > 0) {
+                if (preserveLineBoundaries) {
+                    joined.append('\n');
+                } else if (needsSpace(joined.charAt(joined.length() - 1), normalized.charAt(0))) {
+                    joined.append(' ');
+                }
             }
             joined.append(normalized);
+        }
+        return joined.toString();
+    }
+
+    private static List<String> distributeLineBounded(
+            List<String> originals, String translatedText) {
+        List<String> translatedLines = normalizeTranslatedLines(translatedText);
+        if (translatedLines.size() == originals.size()) {
+            return translatedLines;
+        }
+        String compact = translatedText == null
+                ? "" : translatedText.replace('\n', ' ').replace('\r', ' ').trim();
+        String[] translatedWords = compact.isEmpty() ? new String[0] : compact.split("\\s+");
+        List<String> result = new ArrayList<String>(originals.size());
+        int wordOffset = 0;
+        int remainingLines = 0;
+        for (String original : originals) {
+            if (original != null && !original.trim().isEmpty()) {
+                remainingLines++;
+            }
+        }
+        for (int index = 0; index < originals.size(); index++) {
+            String original = originals.get(index);
+            if (original == null || original.trim().isEmpty()) {
+                result.add(original);
+                continue;
+            }
+            int remainingWords = translatedWords.length - wordOffset;
+            int words = remainingLines <= 1
+                    ? remainingWords
+                    : Math.max(1, (remainingWords + remainingLines - 1) / remainingLines);
+            int end = Math.min(translatedWords.length, wordOffset + words);
+            remainingLines--;
+            if (end > wordOffset) {
+                result.add(joinWords(translatedWords, wordOffset, end));
+                wordOffset = end;
+            } else if (index == originals.size() - 1 && wordOffset < translatedWords.length) {
+                result.add(joinWords(translatedWords, wordOffset, translatedWords.length));
+                wordOffset = translatedWords.length;
+            } else {
+                result.add("");
+            }
+        }
+        return result;
+    }
+
+    private static String joinWords(String[] words, int start, int end) {
+        StringBuilder joined = new StringBuilder();
+        for (int index = start; index < end; index++) {
+            if (joined.length() > 0) {
+                joined.append(' ');
+            }
+            joined.append(words[index]);
+        }
+        return joined.toString();
+    }
+
+    private static String joinWithNewlines(List<String> lines) {
+        StringBuilder joined = new StringBuilder();
+        for (int index = 0; index < lines.size(); index++) {
+            if (index > 0) {
+                joined.append('\n');
+            }
+            String line = lines.get(index);
+            if (line != null) {
+                joined.append(line);
+            }
         }
         return joined.toString();
     }
@@ -234,22 +425,103 @@ public final class RenderTranslationSession implements AutoCloseable {
         if (normalizedTranslated.size() == originals.size()) {
             return normalizedTranslated;
         }
-        List<String> replacement = new ArrayList<String>(originals.size());
-        boolean placed = false;
         String compactTranslated = translatedText == null ? "" : translatedText.replace('\n', ' ').replace('\r', ' ').trim();
+        String[] words = compactTranslated.isEmpty() ? new String[0] : compactTranslated.split("\\s+");
+        List<String> replacement = new ArrayList<String>(originals.size());
+        int offset = 0;
+        int remainingLines = 0;
+        for (String original : originals) {
+            if (original == null || original.trim().isEmpty()) {
+                continue;
+            }
+            remainingLines++;
+        }
         for (String original : originals) {
             if (original == null || original.trim().isEmpty()) {
                 replacement.add(original);
                 continue;
             }
-            if (!placed) {
-                replacement.add(compactTranslated);
-                placed = true;
+            int remainingWords = words.length - offset;
+            int count = remainingLines <= 1
+                    ? remainingWords : Math.max(1, (remainingWords + remainingLines - 1) / remainingLines);
+            int end = Math.min(words.length, offset + count);
+            replacement.add(joinWords(words, offset, end));
+            offset = end;
+            remainingLines--;
+        }
+        return replacement;
+    }
+
+    private static List<String> distributeHologramBlocks(List<String> originals, String translatedText) {
+        List<String> normalizedTranslated = normalizeTranslatedLines(translatedText);
+        if (normalizedTranslated.size() == originals.size()) {
+            return withOriginalFallback(originals, normalizedTranslated);
+        }
+        String compactTranslated = translatedText == null
+                ? "" : translatedText.replace('\n', ' ').replace('\r', ' ').trim();
+        if (compactTranslated.isEmpty()) {
+            return new ArrayList<String>(originals);
+        }
+        if (containsWhitespace(compactTranslated)) {
+            return withOriginalFallback(originals, distributeVisualLines(originals, compactTranslated));
+        }
+        return distributeHologramCharacters(originals, compactTranslated);
+    }
+
+    private static List<String> distributeHologramCharacters(List<String> originals, String translatedText) {
+        List<String> replacement = new ArrayList<String>(originals.size());
+        int remainingLines = 0;
+        for (String original : originals) {
+            if (original != null && !original.trim().isEmpty()) {
+                remainingLines++;
+            }
+        }
+        int charOffset = 0;
+        int remainingChars = translatedText.codePointCount(0, translatedText.length());
+        for (String original : originals) {
+            if (original == null || original.trim().isEmpty()) {
+                replacement.add(original);
+                continue;
+            }
+            if (remainingChars <= 0) {
+                replacement.add(original);
+                remainingLines--;
+                continue;
+            }
+            int count = remainingLines <= 1
+                    ? remainingChars
+                    : Math.max(1, (remainingChars + remainingLines - 1) / remainingLines);
+            int endOffset = translatedText.offsetByCodePoints(charOffset, count);
+            replacement.add(translatedText.substring(charOffset, endOffset));
+            charOffset = endOffset;
+            remainingChars -= count;
+            remainingLines--;
+        }
+        return replacement;
+    }
+
+    private static List<String> withOriginalFallback(List<String> originals, List<String> translatedLines) {
+        List<String> replacement = new ArrayList<String>(originals.size());
+        for (int index = 0; index < originals.size(); index++) {
+            String original = originals.get(index);
+            String translatedLine = index < translatedLines.size() ? translatedLines.get(index) : null;
+            if ((translatedLine == null || translatedLine.trim().isEmpty())
+                    && original != null && !original.trim().isEmpty()) {
+                replacement.add(original);
             } else {
-                replacement.add("");
+                replacement.add(translatedLine);
             }
         }
         return replacement;
+    }
+
+    private static boolean containsWhitespace(String value) {
+        for (int index = 0; index < value.length(); index++) {
+            if (Character.isWhitespace(value.charAt(index))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<String> normalizeTranslatedLines(String translatedText) {
@@ -269,6 +541,12 @@ public final class RenderTranslationSession implements AutoCloseable {
             BiConsumer<TextKind, String> urgentCompletionListener
     ) {
         this.urgentCompletionListener = urgentCompletionListener;
+    }
+
+    public void setRenderCompletionListener(
+            BiConsumer<TextKind, String> renderCompletionListener
+    ) {
+        this.renderCompletionListener = renderCompletionListener;
     }
 
     /**
@@ -358,7 +636,20 @@ public final class RenderTranslationSession implements AutoCloseable {
             translatedOutputs.put(output, Boolean.TRUE);
             translatedOutputs.put(
                     TranslationTextStyling.stripLegacyFormatting(output), Boolean.TRUE);
+            notifyRenderCompletion(key.kind, output);
             notifyUrgentCompletion(key.kind, output);
+        }
+    }
+
+    private void notifyRenderCompletion(TextKind kind, String output) {
+        BiConsumer<TextKind, String> listener = renderCompletionListener;
+        if (listener == null || output == null || output.isEmpty()) {
+            return;
+        }
+        try {
+            listener.accept(kind, output);
+        } catch (RuntimeException ignored) {
+            // Platform callbacks are best-effort.
         }
     }
 
@@ -440,6 +731,18 @@ public final class RenderTranslationSession implements AutoCloseable {
         urgentSubmissions.reset();
     }
 
+    private synchronized void clearMemoryOnClose() {
+        translated.clear();
+        translatedOutputs.clear();
+        pending.clear();
+        retryAfter.clear();
+        visualLineGrouper.clear();
+        lastFailureStatus = "";
+        backgroundSubmissions.reset();
+        prioritySubmissions.reset();
+        urgentSubmissions.reset();
+    }
+
     private SubmissionWindow submissionWindow(TextKind kind) {
         switch (kind) {
             case TITLE:
@@ -511,6 +814,11 @@ public final class RenderTranslationSession implements AutoCloseable {
                 bucket = new VisualLineBucket(kind);
                 buckets.put(kind, bucket);
             }
+            int replayIndex = bucket.replayPreviousIndex(original, now);
+            if (replayIndex >= 0) {
+                return new VisualLineGroup(
+                        bucket.previousText(), original, replayIndex, kind, bucket.previousLines());
+            }
             bucket.add(original, now);
             if (bucket.lines.size() < 2) {
                 return null;
@@ -520,7 +828,9 @@ public final class RenderTranslationSession implements AutoCloseable {
                 bucket.reset(original, now);
                 return null;
             }
-            return new VisualLineGroup(joined, original, bucket.lineIndex(original));
+            bucket.rememberJoined(joined);
+            return new VisualLineGroup(
+                    joined, original, bucket.lineIndex(original), kind, bucket.linesSnapshot());
         }
 
         private synchronized void clear() {
@@ -560,6 +870,9 @@ public final class RenderTranslationSession implements AutoCloseable {
     private static final class VisualLineBucket {
         private final TextKind kind;
         private final List<String> lines = new ArrayList<String>();
+        private List<String> previousLines = Collections.emptyList();
+        private String previousText = "";
+        private boolean replayingPrevious;
         private long updatedAt;
 
         private VisualLineBucket(TextKind kind) {
@@ -567,6 +880,7 @@ public final class RenderTranslationSession implements AutoCloseable {
         }
 
         private void add(String original, long now) {
+            replayingPrevious = false;
             if (!lines.isEmpty() && lines.get(lines.size() - 1).equals(original)) {
                 updatedAt = now;
                 return;
@@ -582,7 +896,46 @@ public final class RenderTranslationSession implements AutoCloseable {
         private void reset(String original, long now) {
             lines.clear();
             lines.add(original);
+            replayingPrevious = false;
             updatedAt = now;
+        }
+
+        private int replayPreviousIndex(String original, long now) {
+            if (previousLines.isEmpty() || previousText.isEmpty()) {
+                return -1;
+            }
+            if (lines.size() == previousLines.size() && previousLines.get(0).equals(original)) {
+                lines.clear();
+                replayingPrevious = true;
+            }
+            if (!replayingPrevious) {
+                return -1;
+            }
+            int index = lines.size();
+            if (index >= previousLines.size() || !previousLines.get(index).equals(original)) {
+                replayingPrevious = false;
+                return -1;
+            }
+            lines.add(original);
+            updatedAt = now;
+            return index;
+        }
+
+        private void rememberJoined(String text) {
+            previousLines = new ArrayList<String>(lines);
+            previousText = text;
+        }
+
+        private String previousText() {
+            return previousText;
+        }
+
+        private List<String> previousLines() {
+            return new ArrayList<String>(previousLines);
+        }
+
+        private List<String> linesSnapshot() {
+            return new ArrayList<String>(lines);
         }
 
         private int lineIndex(String original) {
@@ -593,29 +946,38 @@ public final class RenderTranslationSession implements AutoCloseable {
             }
             return 0;
         }
+
     }
 
     private static final class VisualLineGroup {
         private final String text;
         private final String currentLine;
         private final int currentIndex;
+        private final TextKind kind;
+        private final List<String> lines;
 
-        private VisualLineGroup(String text, String currentLine, int currentIndex) {
+        private VisualLineGroup(
+                String text, String currentLine, int currentIndex, TextKind kind, List<String> lines) {
             this.text = text;
             this.currentLine = currentLine;
             this.currentIndex = currentIndex;
+            this.kind = kind;
+            this.lines = lines == null ? Collections.<String>emptyList() : lines;
         }
 
         private String lineResult(String translatedText) {
-            List<String> translatedLines = normalizeTranslatedLines(translatedText);
-            if (translatedLines.size() > currentIndex) {
-                String line = translatedLines.get(currentIndex);
-                return line == null || line.isEmpty() ? currentLine : line;
+            String compact = translatedText == null
+                    ? "" : translatedText.replace('\n', ' ').replace('\r', ' ').trim();
+            if (compact.isEmpty()) {
+                return currentLine;
+            }
+            if (kind == TextKind.HOLOGRAM && currentIndex >= 0 && currentIndex < lines.size()) {
+                List<String> distributed = distributeHologramBlocks(lines, compact);
+                String line = distributed.get(currentIndex);
+                return line == null || line.trim().isEmpty() ? currentLine : line;
             }
             if (currentIndex == 0) {
-                String compact = translatedText == null
-                        ? "" : translatedText.replace('\n', ' ').replace('\r', ' ').trim();
-                return compact.isEmpty() ? currentLine : compact;
+                return compact;
             }
             return "";
         }
@@ -628,7 +990,7 @@ public final class RenderTranslationSession implements AutoCloseable {
         }
         closed = true;
         coordinator.close();
-        clearRenderedTranslations();
+        clearMemoryOnClose();
     }
 
     private static final class RenderKey {

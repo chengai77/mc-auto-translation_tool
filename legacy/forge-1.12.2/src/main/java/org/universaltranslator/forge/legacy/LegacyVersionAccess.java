@@ -2,11 +2,15 @@ package org.universaltranslator.forge.legacy;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.client.gui.GuiUtilRenderComponents;
 import net.minecraft.client.network.NetHandlerPlayClient;
+import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.text.TextComponentString;
 
+import java.util.List;
+
 /** Compile-time adapter for names changed after Minecraft 1.8.9. */
-final class LegacyVersionAccess {
+public final class LegacyVersionAccess {
     private LegacyVersionAccess() {
     }
 
@@ -43,5 +47,47 @@ final class LegacyVersionAccess {
 
     static int maximumChatLength() {
         return 256;
+    }
+
+    public static List<ITextComponent> splitTranslatedChat(
+            ITextComponent component,
+            int width,
+            FontRenderer font,
+            boolean keepNewLines,
+            boolean keepFormatting
+    ) {
+        ITextComponent translated = translateChatComponent(component);
+        LegacyRenderContext.pushChat();
+        try {
+            return GuiUtilRenderComponents.splitText(
+                    translated, width, font, keepNewLines, keepFormatting);
+        } finally {
+            LegacyRenderContext.pop();
+        }
+    }
+
+    private static ITextComponent translateChatComponent(ITextComponent component) {
+        if (component == null) {
+            return null;
+        }
+        String original = component.getUnformattedText();
+        String translated = LegacyRenderedTextBridge.translateChatMessage(original);
+        if (original.equals(translated)) {
+            return component;
+        }
+        TextComponentString replacement = new TextComponentString(translated);
+        replacement.setStyle(component.getStyle());
+        return replacement;
+    }
+
+    static void refreshChatAsync(final Minecraft minecraft) {
+        minecraft.addScheduledTask(new Runnable() {
+            @Override
+            public void run() {
+                if (minecraft.ingameGUI != null) {
+                    minecraft.ingameGUI.getChatGUI().refreshChat();
+                }
+            }
+        });
     }
 }

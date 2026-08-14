@@ -4,6 +4,7 @@ import org.universaltranslator.core.TranslationProvider;
 import org.universaltranslator.core.TranslationRequest;
 import org.universaltranslator.core.TranslationOutputValidator;
 import org.universaltranslator.core.TargetLanguage;
+import org.universaltranslator.core.GameTranslationHints;
 import org.universaltranslator.core.net.EndpointPolicy;
 import org.universaltranslator.core.net.HttpJsonClient;
 import org.universaltranslator.core.net.JsonStrings;
@@ -50,7 +51,8 @@ public final class OpenAiChatTranslationProvider implements TranslationProvider 
                 + ". Reply with only the translation, without quotes, labels, notes, or explanations. "
                 + "Preserve punctuation, whitespace, URLs, usernames, placeholders, and Minecraft formatting markers."
                 + (request.getText().indexOf('\n') >= 0
-                ? " Keep exactly the same number and order of lines." : "");
+                ? " Keep exactly the same number and order of lines." : "")
+                + GameTranslationHints.openAiInstruction(request);
         int maximumTokens = Math.max(32, Math.min(512, request.getText().length() * 2 + 32));
         boolean offline = providerId.startsWith("offline-loopback");
         String body = new StringBuilder(request.getText().length() + 320)

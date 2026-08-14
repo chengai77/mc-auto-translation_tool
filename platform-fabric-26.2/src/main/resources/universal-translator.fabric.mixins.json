@@ -5,11 +5,16 @@
   "client": [
     "ChatInputSuggestorMixin",
     "DebugHudMixin",
+    "BookEditBoxMixin",
+    "BookScreenMixin",
     "DrawContextMixin",
+    "EntityNameRenderStateMixin",
     "ScreenMixin",
     "SignEditScreenMixin",
     "TextFieldWidgetMixin",
     "TextRendererMixin",
+    "GuiMessageMixin",
+    "SignRendererContextMixin",
     "InGameHudContextMixin",
     "BossBarHudContextMixin"
   ],

@@ -41,6 +41,11 @@ public final class TranslationRenderContext {
         return kinds.isEmpty() ? TextKind.OTHER : kinds.peek();
     }
 
+    public static TextKind currentOr(TextKind fallback) {
+        Deque<TextKind> kinds = KINDS.get();
+        return kinds.isEmpty() ? fallback : kinds.peek();
+    }
+
     /** Prevents locally typed text from entering the global render translation path. */
     public static void pushTextInput() {
         Integer depth = TEXT_INPUT_DEPTH.get();

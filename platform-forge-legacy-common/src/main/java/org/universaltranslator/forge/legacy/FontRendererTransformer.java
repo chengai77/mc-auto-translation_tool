@@ -16,6 +16,8 @@ public final class FontRendererTransformer implements IClassTransformer {
     private static final String GUI_EDIT_SIGN = "net.minecraft.client.gui.inventory.GuiEditSign";
     private static final String BRIDGE =
             "org/universaltranslator/forge/legacy/LegacyRenderedTextBridge";
+    private static final String VERSION_ACCESS =
+            "org/universaltranslator/forge/legacy/LegacyVersionAccess";
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
@@ -143,7 +145,7 @@ public final class FontRendererTransformer implements IClassTransformer {
         }
     }
 
-    /** Marks GuiNewChat.drawChat so privacy policy can distinguish chat from other surfaces. */
+    /** Marks chat rendering and translates the complete component before vanilla wraps it. */
     private abstract static class CountingVisitor extends ClassVisitor {
         private int modifiedMethods;
 
@@ -174,10 +176,18 @@ public final class FontRendererTransformer implements IClassTransformer {
             MethodVisitor delegate = super.visitMethod(access, name, descriptor, signature, exceptions);
             boolean drawChat = "(I)V".equals(descriptor)
                     && ("drawChat".equals(name) || "func_146230_a".equals(name) || "a".equals(name));
-            if (!drawChat) {
-                return delegate;
+            if (drawChat) {
+                markModified();
+                return chatRenderContextVisitor(delegate);
             }
-            markModified();
+            boolean setChatLine = descriptor.startsWith("(L") && descriptor.endsWith(";IIZ)V")
+                    && ("setChatLine".equals(name)
+                    || "func_146237_a".equals(name)
+                    || "a".equals(name));
+            return setChatLine ? chatWrappingVisitor(delegate) : delegate;
+        }
+
+        private MethodVisitor chatRenderContextVisitor(MethodVisitor delegate) {
             return new MethodVisitor(Opcodes.ASM5, delegate) {
                 @Override
                 public void visitCode() {
@@ -193,6 +203,37 @@ public final class FontRendererTransformer implements IClassTransformer {
                                 Opcodes.INVOKESTATIC, CONTEXT, "pop", "()V", false);
                     }
                     super.visitInsn(opcode);
+                }
+            };
+        }
+
+        private MethodVisitor chatWrappingVisitor(MethodVisitor delegate) {
+            return new MethodVisitor(Opcodes.ASM5, delegate) {
+                private boolean injected;
+
+                @Override
+                public void visitMethodInsn(
+                        int opcode, String owner, String name, String descriptor, boolean isInterface) {
+                    boolean splitText = opcode == Opcodes.INVOKESTATIC
+                            && descriptor.startsWith("(L")
+                            && descriptor.endsWith(";ZZ)Ljava/util/List;")
+                            && ("splitText".equals(name)
+                            || "func_178908_a".equals(name)
+                            || "a".equals(name));
+                    if (splitText) {
+                        super.visitMethodInsn(
+                                Opcodes.INVOKESTATIC,
+                                VERSION_ACCESS,
+                                "splitTranslatedChat",
+                                descriptor,
+                                false);
+                        if (!injected) {
+                            markModified();
+                            injected = true;
+                        }
+                        return;
+                    }
+                    super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
                 }
             };
         }

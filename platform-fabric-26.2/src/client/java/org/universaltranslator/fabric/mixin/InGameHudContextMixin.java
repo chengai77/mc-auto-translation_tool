@@ -4,9 +4,11 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.Hud;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.universaltranslator.core.TextKind;
 import org.universaltranslator.fabric.RenderedTextBridge;
@@ -82,7 +84,7 @@ abstract class InGameHudContextMixin {
     @Inject(method = "setOverlayMessage", at = @At("HEAD"))
     private void universalTranslator$preloadActionBar(
             Component message, boolean tinted, CallbackInfo callback) {
-        RenderedTextBridge.preloadUrgentHudText(message, TextKind.ACTION_BAR, tinted);
+        RenderedTextBridge.preloadUrgentHudText(message, TextKind.ITEM_NAME, tinted);
     }
 
     @Inject(
@@ -100,5 +102,26 @@ abstract class InGameHudContextMixin {
             GuiGraphicsExtractor graphics, DeltaTracker deltaTracker, CallbackInfo callback) {
         TranslationRenderContext.pop();
         TranslationLogOverlay.extract(graphics);
+    }
+
+    @Redirect(
+            method = "extractSelectedItemName",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/world/item/ItemStack;getHoverName()Lnet/minecraft/network/chat/Component;"))
+    private Component universalTranslator$translateHeldItemName(ItemStack stack) {
+        return RenderedTextBridge.translateHeldItemName(stack.getHoverName());
+    }
+
+    @Inject(method = "extractSelectedItemName", at = @At("HEAD"))
+    private void universalTranslator$suppressHeldItemLowLevelText(
+            GuiGraphicsExtractor graphics, CallbackInfo callback) {
+        TranslationRenderContext.pushSuppressTranslation();
+    }
+
+    @Inject(method = "extractSelectedItemName", at = @At("RETURN"))
+    private void universalTranslator$restoreHeldItemLowLevelText(
+            GuiGraphicsExtractor graphics, CallbackInfo callback) {
+        TranslationRenderContext.popSuppressTranslation();
     }
 }

@@ -1,5 +1,6 @@
 package org.universaltranslator.core;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CancellationException;
@@ -20,7 +21,7 @@ import java.util.Collections;
 public final class TranslationCoordinator implements AutoCloseable {
     private static final int MAX_QUEUED_TRANSLATIONS = 128;
     private static final int MAX_QUEUED_URGENT_TRANSLATIONS = 64;
-    private static final String CACHE_FORMAT_VERSION = "translation-v5";
+    private static final String CACHE_FORMAT_VERSION = "translation-v6-" + GameTranslationHints.VERSION;
 
     private final TranslationProvider provider;
     private final TranslationStore cache;
@@ -31,6 +32,7 @@ public final class TranslationCoordinator implements AutoCloseable {
             new ConcurrentHashMap<String, CompletableFuture<TranslationResult>>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicInteger submissionSequence = new AtomicInteger();
+    private final RecentTranslationContext recentContext = new RecentTranslationContext();
 
     public TranslationCoordinator(TranslationProvider provider, TranslationStore cache, int workerCount) {
         this.provider = Objects.requireNonNull(provider, "provider");
@@ -178,7 +180,7 @@ public final class TranslationCoordinator implements AutoCloseable {
                 return TranslationResult.unchanged(text);
             }
             String restored = TranslationOutputValidator.requireDisplaySafe(
-                    text, translateCachedSegments(protectedText, sourceLanguage, targetLanguage));
+                    text, translateCachedSegments(protectedText, sourceLanguage, targetLanguage, kind));
             return TranslationResult.success(text, restored);
         } catch (RuntimeException invalidOrMissingCachedValue) {
             return null;
@@ -206,14 +208,15 @@ public final class TranslationCoordinator implements AutoCloseable {
     private String translateCachedSegments(
             ProtectedText protectedText,
             String sourceLanguage,
-            String targetLanguage
+            String targetLanguage,
+            TextKind kind
     ) {
         StringBuilder output = new StringBuilder(protectedText.getOriginal().length() + 16);
         for (ProtectedText.Segment segment : protectedText.getSegments()) {
             if (segment.isProtectedValue()) {
                 output.append(segment.text());
             } else {
-                output.append(translateCachedSegment(segment.text(), sourceLanguage, targetLanguage));
+                output.append(translateCachedSegment(segment.text(), sourceLanguage, targetLanguage, kind));
             }
         }
         return output.toString();
@@ -237,6 +240,11 @@ public final class TranslationCoordinator implements AutoCloseable {
         if (!LanguageHeuristics.shouldTranslate(core, targetLanguage)) {
             return segment;
         }
+        String exact = GameTranslationHints.exactTranslation(core, targetLanguage);
+        if (exact != null) {
+            recentContext.remember(core, exact, kind);
+            return segment.substring(0, start) + exact + segment.substring(end);
+        }
         String cacheKey = CACHE_FORMAT_VERSION + "\n" + provider.id()
                 + "\n" + sourceLanguage + "\n" + targetLanguage + "\n" + core;
         String translated = cache.get(cacheKey);
@@ -248,21 +256,69 @@ public final class TranslationCoordinator implements AutoCloseable {
             }
         }
         if (translated == null) {
-            translated = provider.translate(new TranslationRequest(
-                    core, sourceLanguage, targetLanguage, kind));
-            if (translated == null || translated.trim().isEmpty()) {
+            translated = requestValidatedTranslation(core, core, sourceLanguage, targetLanguage, kind);
+            if (translated == null) {
+                String normalized = normalizeAllCapsCore(core);
+                if (normalized != null) {
+                    translated = requestValidatedTranslation(normalized, core, sourceLanguage, targetLanguage, kind);
+                }
+            }
+            if (translated == null) {
                 throw new IllegalStateException("Provider returned an empty translation");
             }
-            translated = TranslationOutputValidator.requireValid(core, translated);
             cache.put(cacheKey, translated);
         }
+        recentContext.remember(core, translated, kind);
         return segment.substring(0, start) + translated + segment.substring(end);
+    }
+
+    private String requestValidatedTranslation(
+            String requestText,
+            String validationText,
+            String sourceLanguage,
+            String targetLanguage,
+            TextKind kind
+    ) throws Exception {
+        String contextHint = recentContext.snapshot(kind);
+        String translated = provider.translate(new TranslationRequest(
+                requestText, sourceLanguage, targetLanguage, kind, contextHint));
+        if (translated == null || translated.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            String valid = TranslationOutputValidator.requireValid(validationText, translated);
+            recentContext.remember(validationText, valid, kind);
+            return valid;
+        } catch (IllegalArgumentException invalidOutput) {
+            return null;
+        }
+    }
+
+    private static String normalizeAllCapsCore(String core) {
+        boolean hasLetter = false;
+        boolean hasLowerCase = false;
+        for (int i = 0; i < core.length(); i++) {
+            char ch = core.charAt(i);
+            if (Character.isLetter(ch)) {
+                hasLetter = true;
+                if (Character.isLowerCase(ch)) {
+                    hasLowerCase = true;
+                    break;
+                }
+            }
+        }
+        if (!hasLetter || hasLowerCase) {
+            return null;
+        }
+        String lower = core.toLowerCase(Locale.ROOT);
+        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
     }
 
     private String translateCachedSegment(
             String segment,
             String sourceLanguage,
-            String targetLanguage
+            String targetLanguage,
+            TextKind kind
     ) {
         int start = 0;
         int end = segment.length();
@@ -276,6 +332,11 @@ public final class TranslationCoordinator implements AutoCloseable {
         if (!LanguageHeuristics.shouldTranslate(core, targetLanguage)) {
             return segment;
         }
+        String exact = GameTranslationHints.exactTranslation(core, targetLanguage);
+        if (exact != null) {
+            recentContext.remember(core, exact, kind);
+            return segment.substring(0, start) + exact + segment.substring(end);
+        }
         String cacheKey = CACHE_FORMAT_VERSION + "\n" + provider.id()
                 + "\n" + sourceLanguage + "\n" + targetLanguage + "\n" + core;
         String translated = cache.get(cacheKey);
@@ -283,6 +344,7 @@ public final class TranslationCoordinator implements AutoCloseable {
             throw new IllegalStateException("Cached translation is missing");
         }
         translated = TranslationOutputValidator.requireValid(core, translated);
+        recentContext.remember(core, translated, kind);
         return segment.substring(0, start) + translated + segment.substring(end);
     }
 

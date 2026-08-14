@@ -46,8 +46,10 @@ public final class CoreSelfTest {
         normalizesCustomOpenAiEndpoints();
         handlesJsonStrings();
         updatesRenderLookupsWithoutBlocking();
-        translatesRelatedTooltipLinesTogether();
+        translatesTooltipLinesIndependently();
         translatesWrappedVisualLinesAsOneSentence();
+        preservesSeparatorLinesInStructuredText();
+        translatesHologramTextBlocksAsOneSentence();
         translatesOutgoingChatAsynchronously();
         exposesRenderTranslationFailures();
         protectsLiteralsOffTheRenderThread();
@@ -61,8 +63,11 @@ public final class CoreSelfTest {
         ignoresMalformedPersistentCache();
         protectsPlayerNames();
         protectsNetworkAddresses();
+        protectsInlineTextureCodes();
         skipsFullyProtectedText();
         neverSendsProtectedValuesToProvider();
+        prefersGameGlossaryForAmbiguousTerms();
+        passesGameHintsAndContextToProvider();
         prefersChinaDownloadSources();
         configuresWindowsOfflineRuntimePath();
         reportsOfflineStartupDiagnostics();
@@ -389,21 +394,22 @@ public final class CoreSelfTest {
         }
     }
 
-    private static void translatesRelatedTooltipLinesTogether() throws Exception {
+    private static void translatesTooltipLinesIndependently() throws Exception {
         CountingProvider provider = new CountingProvider(false);
         try (RenderTranslationSession session = new RenderTranslationSession(
                 provider, "auto", "zh-CN", 100, 1)) {
             java.util.List<String> original = Arrays.asList("Players online", "Coins");
-            assertEquals(original, session.lookupLines(original, TextKind.TOOLTIP));
+            assertEquals(original, session.lookupIndependentLines(original, TextKind.TOOLTIP));
             long deadline = System.currentTimeMillis() + 2000L;
             java.util.List<String> translated;
+            java.util.List<String> expected = Arrays.asList("\u5728\u7ebf\u73a9\u5bb6", "\u91d1\u5e01");
             do {
                 Thread.sleep(10L);
-                translated = session.lookupLines(original, TextKind.TOOLTIP);
-            } while (original.equals(translated) && System.currentTimeMillis() < deadline);
-            assertEquals(Arrays.asList("在线玩家", "金币"), translated);
-            assertEquals("Players online Coins", provider.lastRequest.get());
-            assertEquals(1, provider.calls.get());
+                translated = session.lookupIndependentLines(original, TextKind.TOOLTIP);
+            } while (!expected.equals(translated) && System.currentTimeMillis() < deadline);
+            assertEquals(expected, translated);
+            assertEquals("Coins", provider.lastRequest.get());
+            assertEquals(2, provider.calls.get());
         }
     }
 
@@ -422,6 +428,66 @@ public final class CoreSelfTest {
             assertEquals("Welcome to the server", provider.lastRequest.get());
             assertEquals(1, provider.calls.get());
             assertEquals(Arrays.asList("joined sentence", "result"), translated);
+        }
+    }
+
+    private static void preservesSeparatorLinesInStructuredText() throws Exception {
+        RecordingProvider provider = new RecordingProvider("\u8bd1\u6587");
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                provider, "auto", "zh-CN", 100, 1)) {
+            java.util.List<String> sign = Arrays.asList("------", "Storage", "------", "");
+            java.util.List<String> expectedSign = Arrays.asList("------", "\u8bd1\u6587", "------", "");
+            java.util.List<String> translatedSign;
+            long deadline = System.currentTimeMillis() + 2000L;
+            do {
+                Thread.sleep(10L);
+                translatedSign = session.lookupLines(sign, TextKind.SIGN);
+            } while (!expectedSign.equals(translatedSign) && System.currentTimeMillis() < deadline);
+            assertEquals(expectedSign, translatedSign);
+            assertEquals("Storage", provider.lastRequest.get());
+
+            String book = "Intro\n------\nStorage";
+            String expectedBook = "\u8bd1\u6587\n------\n\u8bd1\u6587";
+            String translatedBook;
+            deadline = System.currentTimeMillis() + 2000L;
+            do {
+                Thread.sleep(10L);
+                translatedBook = session.lookup(book, TextKind.BOOK);
+            } while (!expectedBook.equals(translatedBook) && System.currentTimeMillis() < deadline);
+            assertEquals(expectedBook, translatedBook);
+            assertFalse(provider.lastRequest.get().contains("------"));
+        }
+    }
+
+    private static void translatesHologramTextBlocksAsOneSentence() throws Exception {
+        RecordingProvider provider = new RecordingProvider("\u6216\u70b9\u51fb\u4e0b\u8f7d");
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                provider, "auto", "zh-CN", 100, 1)) {
+            java.util.List<String> expected = Arrays.asList(
+                    "\u6216\u70b9", "\u51fb\u4e0b", "\u8f7d");
+            assertEquals("Or", session.lookup("Or", TextKind.HOLOGRAM));
+            assertEquals("download it", session.lookup("download it", TextKind.HOLOGRAM));
+            assertEquals("by clicking", session.lookup("by clicking", TextKind.HOLOGRAM));
+
+            long deadline = System.currentTimeMillis() + 2000L;
+            while (provider.calls.get() < 1 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10L);
+            }
+            deadline = System.currentTimeMillis() + 2000L;
+            String translated;
+            String second;
+            String third;
+            java.util.List<String> actual;
+            do {
+                translated = session.lookup("Or", TextKind.HOLOGRAM);
+                second = session.lookup("download it", TextKind.HOLOGRAM);
+                third = session.lookup("by clicking", TextKind.HOLOGRAM);
+                actual = Arrays.asList(translated, second, third);
+                Thread.sleep(10L);
+            } while (!expected.equals(actual) && System.currentTimeMillis() < deadline);
+
+            assertEquals("Or download it by clicking", provider.lastRequest.get());
+            assertEquals(expected, actual);
         }
     }
 
@@ -593,6 +659,26 @@ public final class CoreSelfTest {
         assertEquals(original, text.restore("Join __UT_0__, __UT_1__, __UT_2__ or __UT_3__"));
     }
 
+    private static void protectsInlineTextureCodes() throws Exception {
+        String original = "[block/ladder]Climbables[block/ladder]";
+        ProtectedText text = ProtectedText.parse(original);
+        assertEquals("__UT_0__Climbables__UT_1__", text.getTemplate());
+        assertEquals("[block/ladder]\u53ef\u6500\u722c\u65b9\u5757[block/ladder]",
+                text.restore("__UT_0__\u53ef\u6500\u722c\u65b9\u5757__UT_1__"));
+
+        RecordingProvider provider = new RecordingProvider(
+                "\u53ef\u6500\u722c\u65b9\u5757");
+        try (TranslationCoordinator coordinator = new TranslationCoordinator(
+                provider, new TranslationCache(10), 1)) {
+            TranslationResult result = coordinator.translate(
+                    original, "auto", "zh-CN", TextKind.TOOLTIP)
+                    .get(2, TimeUnit.SECONDS);
+            assertEquals("[block/ladder]\u53ef\u6500\u722c\u65b9\u5757[block/ladder]",
+                    result.getTranslatedText());
+            assertEquals("Climbables", provider.lastRequest.get());
+        }
+    }
+
     private static void skipsFullyProtectedText() throws Exception {
         CountingProvider provider = new CountingProvider(false);
         try (TranslationCoordinator coordinator = new TranslationCoordinator(
@@ -625,6 +711,40 @@ public final class CoreSelfTest {
             assertFalse(requests.contains("play.example.cn"));
             assertFalse(requests.contains("42"));
             assertFalse(requests.contains("__UT_"));
+        }
+    }
+
+    private static void prefersGameGlossaryForAmbiguousTerms() throws Exception {
+        CountingProvider provider = new CountingProvider(false);
+        try (TranslationCoordinator coordinator = new TranslationCoordinator(
+                provider, new TranslationCache(20), 1)) {
+            TranslationResult bullet = coordinator.translate(
+                    "bullet", "auto", "zh-CN", TextKind.ITEM_LORE)
+                    .get(2, TimeUnit.SECONDS);
+            TranslationResult titled = coordinator.translate(
+                    "Bullet:", "auto", "zh-CN", TextKind.ITEM_LORE)
+                    .get(2, TimeUnit.SECONDS);
+            assertEquals("\u5b50\u5f39", bullet.getTranslatedText());
+            assertEquals("\u5b50\u5f39:", titled.getTranslatedText());
+            assertEquals(0, provider.calls.get());
+        }
+    }
+
+    private static void passesGameHintsAndContextToProvider() throws Exception {
+        HintRecordingProvider provider = new HintRecordingProvider();
+        try (TranslationCoordinator coordinator = new TranslationCoordinator(
+                provider, new TranslationCache(20), 1)) {
+            TranslationResult first = coordinator.translate(
+                    "Magic wand", "auto", "zh-CN", TextKind.ITEM_LORE)
+                    .get(2, TimeUnit.SECONDS);
+            assertEquals("\u9b54\u6756", first.getTranslatedText());
+            assertTrue(provider.lastGlossary.get().contains("bullet=\u5b50\u5f39"));
+
+            TranslationResult second = coordinator.translate(
+                    "Open menu", "auto", "zh-CN", TextKind.ITEM_LORE)
+                    .get(2, TimeUnit.SECONDS);
+            assertEquals("\u6253\u5f00\u83dc\u5355", second.getTranslatedText());
+            assertTrue(provider.lastContext.get().contains("Magic wand=>\u9b54\u6756"));
         }
     }
 
@@ -922,6 +1042,29 @@ public final class CoreSelfTest {
                 return fixedResponse;
             }
             return request.getText().replace("Welcome", "欢迎");
+        }
+    }
+
+    private static final class HintRecordingProvider implements TranslationProvider {
+        private final AtomicReference<String> lastGlossary = new AtomicReference<String>();
+        private final AtomicReference<String> lastContext = new AtomicReference<String>();
+
+        @Override
+        public String id() {
+            return "hint-recording-test";
+        }
+
+        @Override
+        public String translate(TranslationRequest request) {
+            lastGlossary.set(request.getGlossaryHint());
+            lastContext.set(request.getContextHint());
+            if ("Magic wand".equals(request.getText())) {
+                return "\u9b54\u6756";
+            }
+            if ("Open menu".equals(request.getText())) {
+                return "\u6253\u5f00\u83dc\u5355";
+            }
+            return request.getText();
         }
     }
 

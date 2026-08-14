@@ -19,7 +19,14 @@ public final class LegacyRenderedTextBridge {
         if (LegacyRenderContext.isTextInput()) {
             return text;
         }
+        if (LegacyRenderContext.current() == TextKind.CHAT) {
+            return text;
+        }
         return translate(text, LegacyRenderContext.current());
+    }
+
+    public static String translateChatMessage(String text) {
+        return translate(text, TextKind.CHAT);
     }
 
     private static String translate(String text, TextKind kind) {
@@ -51,8 +58,9 @@ public final class LegacyRenderedTextBridge {
         if (lines == null || lines.isEmpty()) {
             return lines;
         }
-        List<String> translatedLines = LegacyTranslationRuntime.translateLines(
-                lines, TextKind.TOOLTIP);
+        TextKind tooltipKind = itemTooltip ? TextKind.ITEM_LORE : TextKind.TOOLTIP;
+        List<String> translatedLines = LegacyTranslationRuntime.translateIndependentLines(
+                lines, tooltipKind);
         List<String> replacement = null;
         for (int index = 0; index < lines.size(); index++) {
             String original = lines.get(index);

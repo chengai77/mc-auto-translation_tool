@@ -56,6 +56,16 @@ final class FabricTranslationRuntime {
                 provider, "auto", config.targetLanguage, store, workers, config.displayMode,
                 config.translateEnglishOnly);
         created.setProtectedLiteralsSupplier(FabricTranslationRuntime::playerNameSnapshot);
+        created.setRenderCompletionListener((kind, output) -> {
+            if (kind != TextKind.CHAT && kind != TextKind.SYSTEM_MESSAGE) {
+                return;
+            }
+            MinecraftClient.getInstance().execute(() -> {
+                if (MinecraftClient.getInstance().inGameHud != null) {
+                    MinecraftClient.getInstance().inGameHud.getChatHud().reset();
+                }
+            });
+        });
         session = created;
     }
 
@@ -75,6 +85,7 @@ final class FabricTranslationRuntime {
                 || client.currentScreen instanceof UniversalTranslatorConfigScreen
                 || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
                 || client.currentScreen instanceof TranslationLogScreen
+                || client.currentScreen instanceof TranslationLogSourceScreen
                 || FabricLocalTextGuard.isLocalChatInput(client, original)
                 || RECENT_USER_TEXT.shouldPreserve(original)
                 || client.world == null || client.getNetworkHandler() == null) {
@@ -87,11 +98,33 @@ final class FabricTranslationRuntime {
         return translated;
     }
 
+    static String translateChatStyleFragmentForRender(String original) {
+        return translateStyleFragmentForRender(original, TextKind.CHAT);
+    }
+
+    static String translateStyleFragmentForRender(String original, TextKind kind) {
+        RenderTranslationSession active = session;
+        FabricConfig config = activeConfig;
+        MinecraftClient client = MinecraftClient.getInstance();
+        TextKind effectiveKind = kind == null ? TextKind.CHAT : kind;
+        if (active == null || config == null || !config.allows(effectiveKind)
+                || original == null || original.trim().isEmpty() || original.length() > 80
+                || client.currentScreen instanceof UniversalTranslatorConfigScreen
+                || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
+                || client.currentScreen instanceof TranslationLogScreen
+                || client.currentScreen instanceof TranslationLogSourceScreen
+                || client.world == null || client.getNetworkHandler() == null) {
+            return original;
+        }
+        return displayTranslatedOnly(active.lookup(original.trim(), effectiveKind));
+    }
+
     static void preloadUrgentHudText(Text text, TextKind kind, boolean overlayTinted) {
         RenderTranslationSession active = session;
         FabricConfig config = activeConfig;
         MinecraftClient client = MinecraftClient.getInstance();
-        if (text == null || replayingUrgentHudText || active == null || config == null
+        if (!isUrgentHudKind(kind) || text == null || replayingUrgentHudText
+                || active == null || config == null
                 || !config.allows(kind)
                 || client.world == null || client.getNetworkHandler() == null) {
             return;
@@ -110,8 +143,10 @@ final class FabricTranslationRuntime {
                     if (translated == null || translated.equals(original)) {
                         return;
                     }
-                    client.execute(() -> replayUrgentHudText(kind,
-                            Text.literal(translated).setStyle(text.getStyle()), overlayTinted));
+                    Text styled = BookTextStyler.rebuild(text, translated, text.getStyle());
+                    final Text output = styled == null
+                            ? Text.literal(translated).setStyle(text.getStyle()) : styled;
+                    client.execute(() -> replayUrgentHudText(kind, output, overlayTinted));
                 });
     }
 
@@ -122,7 +157,7 @@ final class FabricTranslationRuntime {
         }
         replayingUrgentHudText = true;
         try {
-            if (kind == TextKind.ACTION_BAR) {
+            if (kind == TextKind.ACTION_BAR || kind == TextKind.ITEM_NAME) {
                 client.inGameHud.setOverlayMessage(translated, overlayTinted);
             } else if (kind == TextKind.SUBTITLE) {
                 client.inGameHud.setSubtitle(translated);
@@ -134,6 +169,13 @@ final class FabricTranslationRuntime {
         } finally {
             replayingUrgentHudText = false;
         }
+    }
+
+    private static boolean isUrgentHudKind(TextKind kind) {
+        return kind == TextKind.ACTION_BAR
+                || kind == TextKind.ITEM_NAME
+                || kind == TextKind.SUBTITLE
+                || kind == TextKind.TITLE;
     }
 
     static void clearTranslationHistory() {
@@ -248,6 +290,7 @@ final class FabricTranslationRuntime {
                 || client.currentScreen instanceof UniversalTranslatorConfigScreen
                 || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
                 || client.currentScreen instanceof TranslationLogScreen
+                || client.currentScreen instanceof TranslationLogSourceScreen
                 || TranslationRenderContext.isTextInput()
                 || client.world == null || client.getNetworkHandler() == null) {
             return originals;
@@ -257,6 +300,22 @@ final class FabricTranslationRuntime {
             TranslationLog.add(joinLogLines(originals), displayTranslatedOnly(joinLogLines(translated)));
         }
         return translated;
+    }
+
+    static List<String> translateIndependentLinesForRender(List<String> originals, TextKind kind) {
+        RenderTranslationSession active = session;
+        FabricConfig config = activeConfig;
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (active == null || config == null || !config.allows(kind)
+                || client.currentScreen instanceof UniversalTranslatorConfigScreen
+                || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
+                || client.currentScreen instanceof TranslationLogScreen
+                || client.currentScreen instanceof TranslationLogSourceScreen
+                || TranslationRenderContext.isTextInput()
+                || client.world == null || client.getNetworkHandler() == null) {
+            return originals;
+        }
+        return active.lookupIndependentLines(originals, kind);
     }
 
     private static boolean shouldRecordInLog(TextKind kind) {

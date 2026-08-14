@@ -6,7 +6,6 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import org.universaltranslator.core.TextKind;
 import org.universaltranslator.core.TranslationDisplayMode;
 
 import java.io.IOException;
@@ -14,26 +13,6 @@ import java.util.List;
 
 final class TranslationLogScreen extends Screen {
     private static final int BUTTON_HEIGHT = 20;
-    private static final int SOURCE_BUTTON_WIDTH = 118;
-    private static final TextKind[] LOG_SOURCE_KINDS = new TextKind[] {
-            TextKind.TITLE,
-            TextKind.SUBTITLE,
-            TextKind.ACTION_BAR,
-            TextKind.CHAT,
-            TextKind.SYSTEM_MESSAGE,
-            TextKind.BOSS_BAR,
-            TextKind.SCOREBOARD_TITLE,
-            TextKind.SCOREBOARD_LINE,
-            TextKind.PLAYER_LIST_HEADER,
-            TextKind.PLAYER_LIST_FOOTER,
-            TextKind.CONTAINER_TITLE,
-            TextKind.BOOK,
-            TextKind.SIGN,
-            TextKind.DISCONNECT_REASON,
-            TextKind.HOLOGRAM,
-            TextKind.OTHER
-    };
-
     private final Screen parent;
     private int scroll;
     private boolean draggingScrollbar;
@@ -69,7 +48,9 @@ final class TranslationLogScreen extends Screen {
             }
             refreshLogWidgets();
         }).bounds(width - 102, bottom, 90, BUTTON_HEIGHT).build());
-        addLogSourceButtons();
+        addRenderableWidget(Button.builder(Component.translatable("screen.universal_translator.log.source_settings"), button ->
+                Minecraft.getInstance().setScreen(new TranslationLogSourceScreen(this)))
+                .bounds(216, bottom, 118, BUTTON_HEIGHT).build());
         if (config == null || !config.pinnedLogEnabled) {
             return;
         }
@@ -104,44 +85,6 @@ final class TranslationLogScreen extends Screen {
                 config.pinnedLogScale, -5, 5, 70, 160, (current, value) ->
                         savePinned(true, current.pinnedLogPreset, current.pinnedLogX, current.pinnedLogY,
                                 current.pinnedLogWidth, value));
-    }
-
-    private void addLogSourceButtons() {
-        FabricConfig config = FabricTranslationRuntime.currentConfig();
-        if (config == null) {
-            return;
-        }
-        int columns = logSourceColumns();
-        int startX = 12;
-        int startY = sourceControlsTop();
-        for (int index = 0; index < LOG_SOURCE_KINDS.length; index++) {
-            TextKind kind = LOG_SOURCE_KINDS[index];
-            int column = index % columns;
-            int row = index / columns;
-            int x = startX + column * SOURCE_BUTTON_WIDTH;
-            int y = startY + 14 + row * 22;
-            addRenderableWidget(Button.builder(logSourceText(config, kind), button -> toggleLogSource(kind))
-                    .bounds(x, y, SOURCE_BUTTON_WIDTH - 6, BUTTON_HEIGHT).build());
-        }
-    }
-
-    private Component logSourceText(FabricConfig config, TextKind kind) {
-        String marker = config.logAllowedKinds.contains(kind) ? "[x] " : "[ ] ";
-        return Component.literal(marker).append(Component.translatable("screen.universal_translator.log.kind." + kind.name().toLowerCase()));
-    }
-
-    private void toggleLogSource(TextKind kind) {
-        FabricConfig config = FabricTranslationRuntime.currentConfig();
-        if (config == null) {
-            return;
-        }
-        try {
-            FabricConfig updated = config.withLogAllowedKind(kind, !config.logAllowedKinds.contains(kind));
-            updated.save();
-            FabricTranslationRuntime.updateConfig(updated);
-            refreshLogWidgets();
-        } catch (IOException ignored) {
-        }
     }
 
     private void addStepper(int x, int y, String label, int value, int decrement, int increment,
@@ -275,17 +218,7 @@ final class TranslationLogScreen extends Screen {
 
     private int controlsTop() {
         FabricConfig config = FabricTranslationRuntime.currentConfig();
-        int top = sourceControlsTop();
-        return config != null && config.pinnedLogEnabled ? top - 58 : top;
-    }
-
-    private int sourceControlsTop() {
-        int rows = (LOG_SOURCE_KINDS.length + logSourceColumns() - 1) / logSourceColumns();
-        return height - 34 - 14 - rows * 22;
-    }
-
-    private int logSourceColumns() {
-        return Math.max(1, Math.min(3, (width - 24) / SOURCE_BUTTON_WIDTH));
+        return config != null && config.pinnedLogEnabled ? height - 92 : height - 34;
     }
 
     private String entryText(TranslationLog.Entry entry) {

@@ -3,6 +3,7 @@ package org.universaltranslator.core.provider;
 import org.universaltranslator.core.TranslationProvider;
 import org.universaltranslator.core.TranslationRequest;
 import org.universaltranslator.core.TargetLanguage;
+import org.universaltranslator.core.GameTranslationHints;
 import org.universaltranslator.core.net.HttpJsonClient;
 import org.universaltranslator.core.net.JsonStrings;
 import org.universaltranslator.core.net.TencentCloudV3Signer;
@@ -56,7 +57,7 @@ public final class TencentHunyuanProvider implements TranslationProvider {
             body.append("\"Source\":").append(JsonStrings.quote(source)).append(',');
         }
         body.append("\"Target\":").append(JsonStrings.quote(target)).append(',')
-                .append("\"Field\":\"游戏界面\"")
+                .append("\"Field\":").append(JsonStrings.quote(GameTranslationHints.tencentField(request)))
                 .append('}');
 
         String payload = body.toString();

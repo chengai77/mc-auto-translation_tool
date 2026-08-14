@@ -3,10 +3,12 @@ package org.universaltranslator.fabric.mixin;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.hud.InGameHud;
 import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.universaltranslator.core.TextKind;
 import org.universaltranslator.fabric.RenderedTextBridge;
@@ -34,7 +36,7 @@ abstract class InGameHudContextMixin {
     @Inject(method = "setOverlayMessage", at = @At("HEAD"))
     private void universalTranslator$preloadOverlayMessage(
             Text message, boolean tinted, CallbackInfo callback) {
-        RenderedTextBridge.preloadUrgentHudText(message, TextKind.ACTION_BAR, tinted);
+        RenderedTextBridge.preloadUrgentHudText(message, TextKind.ITEM_NAME, tinted);
     }
 
     @Inject(method = "renderChat", at = @At("HEAD"))
@@ -99,5 +101,26 @@ abstract class InGameHudContextMixin {
     private void universalTranslator$leaveActionBar(
             DrawContext context, RenderTickCounter tickCounter, CallbackInfo callback) {
         TranslationRenderContext.pop();
+    }
+
+    @Redirect(
+            method = "renderHeldItemTooltip",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/item/ItemStack;getName()Lnet/minecraft/text/Text;"))
+    private Text universalTranslator$translateHeldItemName(ItemStack stack) {
+        return RenderedTextBridge.translateHeldItemName(stack.getName());
+    }
+
+    @Inject(method = "renderHeldItemTooltip", at = @At("HEAD"))
+    private void universalTranslator$suppressHeldItemLowLevelText(
+            DrawContext context, CallbackInfo callback) {
+        TranslationRenderContext.pushSuppressTranslation();
+    }
+
+    @Inject(method = "renderHeldItemTooltip", at = @At("RETURN"))
+    private void universalTranslator$restoreHeldItemLowLevelText(
+            DrawContext context, CallbackInfo callback) {
+        TranslationRenderContext.popSuppressTranslation();
     }
 }

@@ -2,7 +2,7 @@ package org.universaltranslator.core;
 
 import java.util.Locale;
 
-/** Supported offline models and their user-facing metadata. */
+/** 离线模型元数据 */
 public enum OfflineModel {
     LITE(
             "lite",
@@ -61,7 +61,7 @@ public enum OfflineModel {
         return this == LITE ? QUALITY : LITE;
     }
 
-    /** Unknown or malformed values fall back to the lower-resource Lite model. */
+    /** 异常值回退Lite */
     public static OfflineModel fromConfig(String value) {
         String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
         for (OfflineModel model : values()) {

@@ -1,6 +1,6 @@
 package org.universaltranslator.core;
 
-/** Converts internal provider status text into localized UI messages. */
+/** 状态本地化 */
 public final class TranslationStatusLocalizer {
     private TranslationStatusLocalizer() {
     }
@@ -76,6 +76,12 @@ public final class TranslationStatusLocalizer {
         return value.startsWith("翻译失败：")
                 || value.startsWith("离线翻译失败：")
                 || value.contains("均失败");
+    }
+
+    public static boolean isDownloadProgress(String status) {
+        String value = status == null ? "" : status.trim();
+        return value.startsWith("正在下载离线引擎：")
+                || value.startsWith("正在下载离线模型：");
     }
 
     private static String normalizeMetrics(String value) {

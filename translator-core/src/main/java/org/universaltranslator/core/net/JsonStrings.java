@@ -1,6 +1,6 @@
 package org.universaltranslator.core.net;
 
-/** Small dependency-free JSON string helper for the narrow provider response formats we use. */
+/** JSON字符串辅助 */
 public final class JsonStrings {
     private JsonStrings() {
     }

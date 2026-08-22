@@ -3,6 +3,7 @@ package org.universaltranslator.fabric.mixin;
 import net.minecraft.client.render.entity.EntityRenderer;
 import net.minecraft.client.render.entity.state.EntityRenderState;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.decoration.ArmorStandEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -18,6 +19,10 @@ abstract class EntityNameRenderStateMixin {
             EntityRenderState state,
             float tickProgress,
             CallbackInfo callback) {
+        if (entity instanceof ArmorStandEntity
+                && (entity.isInvisible() || ((ArmorStandEntity) entity).isMarker())) {
+            return;
+        }
         state.displayName = RenderedTextBridge.translateEntityName(state.displayName);
     }
 }

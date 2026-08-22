@@ -11,7 +11,7 @@ import org.universaltranslator.core.TargetLanguage;
 import org.universaltranslator.core.TranslationStatusLocalizer;
 import org.universaltranslator.core.TranslationTextColor;
 
-/** Minimal dependency-free settings screen, opened with U by default. */
+/** U键设置页 */
 final class UniversalTranslatorConfigScreen extends Screen {
     private final Screen parent;
     private final FabricConfig original;
@@ -22,7 +22,6 @@ final class UniversalTranslatorConfigScreen extends Screen {
     private boolean diskCache;
     private boolean offlineAutoDownload;
     private OfflineModel offlineModel;
-    private boolean apiFallback;
     private TranslationDisplayMode displayMode;
     private boolean translateEnglishOnly;
     private TranslationTextColor translatedTextColor;
@@ -33,8 +32,15 @@ final class UniversalTranslatorConfigScreen extends Screen {
     private String tencentSecretId;
     private String tencentSecretKey;
     private String tencentModel;
+    private String deepSeekApiKey;
+    private String deepSeekModel;
+    private String dashScopeApiKey;
+    private String dashScopeModel;
+    private String zhipuApiKey;
+    private String zhipuModel;
+    private String kimiApiKey;
+    private String kimiModel;
     private EditBox targetLanguage;
-    private EditBox outgoingTargetLanguage;
     private EditBox endpoint;
     private Button enabledButton;
     private Button chatButton;
@@ -44,8 +50,7 @@ final class UniversalTranslatorConfigScreen extends Screen {
     private Button displayButton;
     private Button downloadButton;
     private Button modelButton;
-    private Button fallbackButton;
-    private Button diagnosticsButton;
+    private Button cacheEditorButton;
     private Button mixedTextButton;
     private Button colorButton;
     private Button outgoingButton;
@@ -63,7 +68,6 @@ final class UniversalTranslatorConfigScreen extends Screen {
         this.diskCache = config.diskCache;
         this.offlineAutoDownload = config.offlineAutoDownload;
         this.offlineModel = config.offlineModel;
-        this.apiFallback = config.apiFallback;
         this.displayMode = config.displayMode;
         this.translateEnglishOnly = config.translateEnglishOnly;
         this.translatedTextColor = config.translatedTextColor;
@@ -74,15 +78,21 @@ final class UniversalTranslatorConfigScreen extends Screen {
         this.tencentSecretId = config.tencentSecretId;
         this.tencentSecretKey = config.tencentSecretKey;
         this.tencentModel = config.tencentModel;
+        this.deepSeekApiKey = config.deepSeekApiKey;
+        this.deepSeekModel = config.deepSeekModel;
+        this.dashScopeApiKey = config.dashScopeApiKey;
+        this.dashScopeModel = config.dashScopeModel;
+        this.zhipuApiKey = config.zhipuApiKey;
+        this.zhipuModel = config.zhipuModel;
+        this.kimiApiKey = config.kimiApiKey;
+        this.kimiModel = config.kimiModel;
     }
 
     @Override
     protected void init() {
         String targetValue = targetLanguage == null
-                ? original.targetLanguage : targetLanguage.getValue();
+                ? defaultTargetLanguage(original.targetLanguage) : targetLanguage.getValue();
         String endpointValue = endpoint == null ? original.endpoint : endpoint.getValue();
-        String outgoingTargetValue = outgoingTargetLanguage == null
-                ? original.outgoingTargetLanguage : outgoingTargetLanguage.getValue();
         Layout layout = layout();
         int left = layout.left;
         this.enabledButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
@@ -102,8 +112,9 @@ final class UniversalTranslatorConfigScreen extends Screen {
             refreshLabels();
         }).bounds(layout.right, layout.row(1), layout.buttonWidth, 20).build());
         this.providerButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
-            provider = nextProvider(provider);
-            refreshLabels();
+            if (this.minecraft != null) {
+                this.minecraft.gui.setScreen(new UniversalTranslatorProviderScreen(this));
+            }
         }).bounds(left, layout.row(2), layout.buttonWidth, 20).build());
         this.displayButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
             displayMode = displayMode == TranslationDisplayMode.ORIGINAL_AND_TRANSLATED
@@ -125,6 +136,11 @@ final class UniversalTranslatorConfigScreen extends Screen {
                     this.minecraft.gui.setScreen(new UniversalTranslatorLlmConfigScreen(
                             this, llmEndpoint, llmModel, !llmApiKey.isEmpty()));
                 }
+            } else if (isOfficialProvider()) {
+                if (this.minecraft != null) {
+                    this.minecraft.gui.setScreen(new UniversalTranslatorDeepSeekConfigScreen(
+                            this, provider, officialModel(provider), !officialApiKey(provider).isEmpty()));
+                }
             } else if (isTencent()) {
                 if (this.minecraft != null) {
                     this.minecraft.gui.setScreen(new UniversalTranslatorTencentConfigScreen(
@@ -135,21 +151,20 @@ final class UniversalTranslatorConfigScreen extends Screen {
             }
             refreshLabels();
         }).bounds(left, layout.row(4), layout.buttonWidth, 20).build());
-        this.fallbackButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
-            apiFallback = !apiFallback;
+        this.outgoingButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            translateOutgoing = !translateOutgoing;
             refreshLabels();
         }).bounds(layout.right, layout.row(4), layout.buttonWidth, 20).build());
         this.modelButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
             offlineModel = offlineModel.next();
             refreshLabels();
         }).bounds(left, layout.row(5), layout.buttonWidth, 20).build());
-        this.diagnosticsButton = addRenderableWidget(Button.builder(
-                Component.translatable("screen.universal_translator.diagnostics.title"), button -> {
-            if (minecraft != null) {
-                minecraft.gui.setScreen(new UniversalTranslatorDiagnosticsScreen(this));
-            }
-        }).bounds(layout.right, layout.row(5), layout.buttonWidth, 20).build());
-
+        this.cacheEditorButton = addRenderableWidget(Button.builder(
+                Component.translatable("screen.universal_translator.option.cache_editor"), button -> {
+                    if (this.minecraft != null) {
+                        this.minecraft.gui.setScreen(new UniversalTranslatorCacheScreen(this));
+                    }
+                }).bounds(layout.right, layout.row(5), layout.buttonWidth, 20).build());
         int presetWidth = Math.max(46, Math.min(68, layout.buttonWidth / 2));
         int languageWidth = layout.buttonWidth - presetWidth - 4;
         this.targetLanguage = addRenderableWidget(new EditBox(
@@ -161,21 +176,12 @@ final class UniversalTranslatorConfigScreen extends Screen {
             targetLanguage.setValue(TargetLanguage.nextPreset(targetLanguage.getValue()));
             refreshLabels();
         }).bounds(left + languageWidth + 4, layout.targetY, presetWidth, 20).build());
-        this.outgoingButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
-            translateOutgoing = !translateOutgoing;
-            refreshLabels();
-        }).bounds(layout.right, layout.targetY, layout.buttonWidth, 20).build());
         this.endpoint = addRenderableWidget(new EditBox(
-                this.font, left, layout.endpointY, layout.buttonWidth, 20,
+                this.font, layout.right, layout.targetY, layout.buttonWidth, 20,
                 Component.translatable("screen.universal_translator.endpoint")));
         this.endpoint.setMaxLength(512);
+        this.endpoint.setHint(Component.literal("http://127.0.0.1:5000/..."));
         this.endpoint.setValue(endpointValue);
-        this.outgoingTargetLanguage = addRenderableWidget(new EditBox(
-                this.font, layout.right, layout.endpointY, layout.buttonWidth, 20,
-                Component.translatable("screen.universal_translator.outgoing_target_language")));
-        this.outgoingTargetLanguage.setMaxLength(32);
-        this.outgoingTargetLanguage.setValue(outgoingTargetValue);
-
         addRenderableWidget(Button.builder(Component.translatable("screen.universal_translator.save"), button -> saveAndApply())
                 .bounds(left, layout.saveY, layout.buttonWidth, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), button -> onClose())
@@ -188,7 +194,7 @@ final class UniversalTranslatorConfigScreen extends Screen {
         chatButton.setMessage(Component.translatable("screen.universal_translator.option.chat", onOff(translateChat)));
         otherButton.setMessage(Component.translatable("screen.universal_translator.option.other", onOff(translateOther)));
         cacheButton.setMessage(Component.translatable("screen.universal_translator.option.cache", onOff(diskCache)));
-        providerButton.setMessage(Component.translatable("screen.universal_translator.option.provider", providerLabel()));
+        providerButton.setMessage(Component.translatable("screen.universal_translator.option.change_provider"));
         displayButton.setMessage(Component.translatable("screen.universal_translator.option.display",
                 tr(displayMode == TranslationDisplayMode.ORIGINAL_AND_TRANSLATED
                         ? "value.universal_translator.display_bilingual"
@@ -197,17 +203,17 @@ final class UniversalTranslatorConfigScreen extends Screen {
         colorButton.setMessage(Component.translatable("screen.universal_translator.option.color", colorLabel(translatedTextColor)));
         downloadButton.setMessage(isLlm()
                 ? Component.translatable("screen.universal_translator.option.llm_settings")
+                : (isOfficialProvider()
+                ? Component.translatable("screen.universal_translator.option.official_settings", providerLabel())
                 : (isTencent()
                 ? Component.translatable("screen.universal_translator.option.tencent_settings")
-                : Component.translatable("screen.universal_translator.option.download", onOff(offlineAutoDownload))));
+                : Component.translatable("screen.universal_translator.option.download", onOff(offlineAutoDownload)))));
         modelButton.setMessage(Component.translatable("screen.universal_translator.option.model", offlineModel.displayName()));
-        fallbackButton.setMessage(Component.translatable("screen.universal_translator.option.fallback", onOff(apiFallback)));
         outgoingButton.setMessage(Component.translatable("screen.universal_translator.option.outgoing", onOff(translateOutgoing)));
         targetLanguageButton.setMessage(Component.translatable("screen.universal_translator.option.target_preset",
                 TargetLanguage.displayName(targetLanguage.getValue())));
-        downloadButton.active = isOffline() || isLlm() || isTencent();
+        downloadButton.active = isOffline() || isLlm() || isOfficialProvider() || isTencent();
         modelButton.active = isOffline();
-        fallbackButton.active = isOffline();
     }
 
     private static String onOff(boolean value) {
@@ -224,18 +230,23 @@ final class UniversalTranslatorConfigScreen extends Screen {
             if (targetLanguage.getValue().trim().isEmpty()) {
                 throw new IllegalArgumentException(tr("error.universal_translator.target_required"));
             }
-            if (translateOutgoing && outgoingTargetLanguage.getValue().trim().isEmpty()) {
-                throw new IllegalArgumentException(tr("error.universal_translator.outgoing_target_required"));
-            }
             String selectedProvider = isLlm() ? "custom-api" : provider;
             if ("custom-api".equalsIgnoreCase(selectedProvider)
                     && (llmEndpoint.trim().isEmpty() || llmModel.trim().isEmpty())) {
                 throw new IllegalArgumentException(tr("error.universal_translator.llm_required"));
             }
+            if (FabricConfig.isOfficialProvider(selectedProvider)
+                    && (officialApiKey(selectedProvider).trim().isEmpty() || officialModel(selectedProvider).trim().isEmpty())) {
+                throw new IllegalArgumentException(tr("error.universal_translator.official_required"));
+            }
             FabricConfig updated = buildConfig();
             if (updated.enabled && "tencent-hunyuan".equalsIgnoreCase(updated.provider)
                     && (updated.tencentSecretId.isEmpty() || updated.tencentSecretKey.isEmpty())) {
                 throw new IllegalArgumentException(tr("error.universal_translator.tencent_credentials"));
+            }
+            if (updated.enabled && FabricConfig.isOfficialProvider(updated.provider)
+                    && updated.officialApiKey(updated.provider).isEmpty()) {
+                throw new IllegalArgumentException(tr("error.universal_translator.official_credentials"));
             }
             if (updated.enabled) {
                 updated.validateProviderConfiguration();
@@ -266,10 +277,7 @@ final class UniversalTranslatorConfigScreen extends Screen {
                 left, layout.targetY - 11, 0xA0A0A0);
         graphics.text(this.font,
                 Component.translatable("screen.universal_translator.endpoint_hint"),
-                left, layout.endpointY - 11, 0xA0A0A0);
-        graphics.text(this.font,
-                Component.translatable("screen.universal_translator.outgoing_target_hint"),
-                layout.right, layout.endpointY - 11, 0xA0A0A0);
+                layout.right, layout.targetY - 11, 0xA0A0A0);
         String rawRuntimeStatus = FabricTranslationRuntime.status();
         String runtimeStatus = TranslationStatusLocalizer.localize(rawRuntimeStatus,
                 UniversalTranslatorConfigScreen::tr);
@@ -313,6 +321,10 @@ final class UniversalTranslatorConfigScreen extends Screen {
         return "tencent-hunyuan".equalsIgnoreCase(provider);
     }
 
+    private boolean isOfficialProvider() {
+        return FabricConfig.isOfficialProvider(provider);
+    }
+
     private boolean isOffline() {
         return "offline".equalsIgnoreCase(provider);
     }
@@ -322,23 +334,35 @@ final class UniversalTranslatorConfigScreen extends Screen {
                 || "openai-compatible".equalsIgnoreCase(provider);
     }
 
-    private String providerLabel() {
-        return isOffline() ? tr("value.universal_translator.provider_offline")
-                : (isTencent() ? tr("value.universal_translator.provider_tencent")
-                : (isLlm() ? tr("value.universal_translator.provider_llm") : "Libre"));
+    String providerLabel() {
+        if (isOffline()) {
+            return tr("value.universal_translator.provider_offline");
+        }
+        if (isTencent()) {
+            return tr("value.universal_translator.provider_tencent");
+        }
+        if ("deepseek".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_deepseek");
+        }
+        if ("dashscope".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_dashscope");
+        }
+        if ("zhipu".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_zhipu");
+        }
+        if ("kimi".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_kimi");
+        }
+        return isLlm() ? tr("value.universal_translator.provider_llm") : "Libre";
     }
 
-    private static String nextProvider(String current) {
-        if ("offline".equalsIgnoreCase(current)) {
-            return "libretranslate";
-        }
-        if ("libretranslate".equalsIgnoreCase(current)) {
-            return "tencent-hunyuan";
-        }
-        if ("tencent-hunyuan".equalsIgnoreCase(current)) {
-            return "custom-api";
-        }
-        return "offline";
+    String provider() {
+        return provider;
+    }
+
+    void selectProvider(String provider) {
+        this.provider = provider == null || provider.trim().isEmpty() ? "offline" : provider.trim();
+        refreshLabels();
     }
 
     void applyLlmSettings(String endpoint, String model, String apiKey) {
@@ -361,6 +385,72 @@ final class UniversalTranslatorConfigScreen extends Screen {
         return tencentSecretKey;
     }
 
+    void applyOfficialProviderSettings(String selectedProvider, String model, String apiKey) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            this.dashScopeModel = model;
+            this.dashScopeApiKey = apiKey;
+        } else if ("zhipu".equals(normalized)) {
+            this.zhipuModel = model;
+            this.zhipuApiKey = apiKey;
+        } else if ("kimi".equals(normalized)) {
+            this.kimiModel = model;
+            this.kimiApiKey = apiKey;
+        } else {
+            this.deepSeekModel = model;
+            this.deepSeekApiKey = apiKey;
+        }
+    }
+
+    String officialApiKey(String selectedProvider) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            return dashScopeApiKey;
+        }
+        if ("zhipu".equals(normalized)) {
+            return zhipuApiKey;
+        }
+        if ("kimi".equals(normalized)) {
+            return kimiApiKey;
+        }
+        return deepSeekApiKey;
+    }
+
+    String officialModel(String selectedProvider) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            return dashScopeModel;
+        }
+        if ("zhipu".equals(normalized)) {
+            return zhipuModel;
+        }
+        if ("kimi".equals(normalized)) {
+            return kimiModel;
+        }
+        return deepSeekModel;
+    }
+
+    String defaultOfficialModel(String selectedProvider) {
+        return original.defaultOfficialModel(selectedProvider);
+    }
+
+    private static String normalizeOfficialProvider(String selectedProvider) {
+        if (selectedProvider == null) {
+            return "deepseek";
+        }
+        String normalized = selectedProvider.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("aliyun-dashscope".equals(normalized)) {
+            return "dashscope";
+        }
+        if ("zhipu-ai".equals(normalized)) {
+            return "zhipu";
+        }
+        if ("moonshot".equals(normalized) || "moonshot-kimi".equals(normalized)) {
+            return "kimi";
+        }
+        return normalized;
+    }
+
     private FabricConfig buildConfig() {
         String selectedProvider = isLlm() ? "custom-api" : provider;
         return original.withSettings(
@@ -369,7 +459,7 @@ final class UniversalTranslatorConfigScreen extends Screen {
                 translateOther,
                 translateOutgoing,
                 targetLanguage.getValue(),
-                outgoingTargetLanguage.getValue(),
+                original.outgoingTargetLanguage,
                 displayMode,
                 translateEnglishOnly,
                 translatedTextColor,
@@ -380,41 +470,40 @@ final class UniversalTranslatorConfigScreen extends Screen {
                 llmModel,
                 offlineAutoDownload,
                 offlineModel,
-                apiFallback,
-                diskCache).withTencentSettings(tencentSecretId, tencentSecretKey, tencentModel);
+                original.apiFallback,
+                diskCache)
+                .withTencentSettings(tencentSecretId, tencentSecretKey, tencentModel)
+                .withOfficialProviderSettings("deepseek", deepSeekApiKey, deepSeekModel)
+                .withOfficialProviderSettings("dashscope", dashScopeApiKey, dashScopeModel)
+                .withOfficialProviderSettings("zhipu", zhipuApiKey, zhipuModel)
+                .withOfficialProviderSettings("kimi", kimiApiKey, kimiModel);
     }
 
     void clearTencentSettings() {
         this.tencentSecretId = "";
         this.tencentSecretKey = "";
         this.tencentModel = "";
-        FabricConfig cleared = buildConfig();
-        try {
-            cleared.save();
-        } catch (Exception ignored) {
-            // 配置已清空，保存失败时忽略
-        }
-        try {
-            FabricTranslationRuntime.initialize(cleared);
-        } catch (Exception ignored) {
-            // 运行时将在下次保存时刷新
-        }
+        saveClearedConfig();
     }
 
     void clearLlmSettings() {
         this.llmEndpoint = "";
         this.llmApiKey = "";
         this.llmModel = "";
+        saveClearedConfig();
+    }
+
+    private void saveClearedConfig() {
         FabricConfig cleared = buildConfig();
         try {
             cleared.save();
         } catch (Exception ignored) {
-            // 配置已清空，保存失败时忽略
+            // 清空后忽略保存错误
         }
         try {
             FabricTranslationRuntime.initialize(cleared);
         } catch (Exception ignored) {
-            // 运行时将在下次保存时刷新
+            // 下次保存刷新
         }
     }
 
@@ -435,6 +524,10 @@ final class UniversalTranslatorConfigScreen extends Screen {
         return Component.translatable(key, arguments).getString();
     }
 
+    private static String defaultTargetLanguage(String value) {
+        return value == null || value.trim().isEmpty() || "-".equals(value.trim()) ? "zh-CN" : value;
+    }
+
     private Layout layout() {
         int totalWidth = Math.max(180, Math.min(310, this.width - 20));
         int gap = 8;
@@ -450,27 +543,15 @@ final class UniversalTranslatorConfigScreen extends Screen {
     }
 
     private static final class Layout {
-        private final int left;
-        private final int right;
-        private final int totalWidth;
-        private final int buttonWidth;
-        private final int top;
-        private final int rowStep;
-        private final int targetY;
-        private final int endpointY;
-        private final int saveY;
+        private final int left, right, totalWidth, buttonWidth;
+        private final int top, rowStep, targetY, endpointY, saveY;
 
         private Layout(int left, int right, int totalWidth, int buttonWidth,
                        int top, int rowStep, int targetY, int endpointY, int saveY) {
-            this.left = left;
-            this.right = right;
-            this.totalWidth = totalWidth;
-            this.buttonWidth = buttonWidth;
-            this.top = top;
-            this.rowStep = rowStep;
-            this.targetY = targetY;
-            this.endpointY = endpointY;
-            this.saveY = saveY;
+            this.left = left; this.right = right;
+            this.totalWidth = totalWidth; this.buttonWidth = buttonWidth;
+            this.top = top; this.rowStep = rowStep;
+            this.targetY = targetY; this.endpointY = endpointY; this.saveY = saveY;
         }
 
         private int row(int index) {

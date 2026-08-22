@@ -2,7 +2,7 @@ package org.universaltranslator.core.net;
 
 import java.net.URI;
 
-/** Prevents accidental plaintext transmission to non-local translation services. */
+/** 禁止明文外传 */
 public final class EndpointPolicy {
     private EndpointPolicy() {
     }

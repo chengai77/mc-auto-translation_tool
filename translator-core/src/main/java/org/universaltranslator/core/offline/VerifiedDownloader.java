@@ -13,11 +13,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
 
-/** HTTPS downloader with resume support, a pinned size and a mandatory SHA-256 check. */
+/** 校验下载器 */
 public final class VerifiedDownloader {
     private static final int MAX_REDIRECTS = 8;
 
-    /** Receives verified byte progress without owning any UI or platform code. */
+    /** 进度回调接口 */
     public interface ProgressListener {
         void onProgress(long downloadedBytes, long totalBytes);
     }
@@ -25,7 +25,7 @@ public final class VerifiedDownloader {
     private static final ProgressListener NO_PROGRESS = new ProgressListener() {
         @Override
         public void onProgress(long downloadedBytes, long totalBytes) {
-            // Compatibility overloads deliberately remain silent.
+            // 兼容重载静默
         }
     };
 
@@ -41,7 +41,7 @@ public final class VerifiedDownloader {
         return download(Collections.singletonList(source), destination, expectedSize, expectedSha256, NO_PROGRESS);
     }
 
-    /** Tries geographically suitable mirrors in order while sharing one resumable partial file. */
+    /** 镜像顺序尝试 */
     public static Path download(
             Iterable<URI> sources,
             Path destination,
@@ -51,7 +51,7 @@ public final class VerifiedDownloader {
         return download(sources, destination, expectedSize, expectedSha256, NO_PROGRESS);
     }
 
-    /** Same verified download with resumable progress for in-game status displays. */
+    /** 带进度下载 */
     public static Path download(
             Iterable<URI> sources,
             Path destination,

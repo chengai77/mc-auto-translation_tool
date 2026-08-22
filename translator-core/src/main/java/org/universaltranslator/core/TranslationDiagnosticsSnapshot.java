@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/** A secret-free snapshot suitable for an in-game diagnostics screen. */
+/** 无密钥诊断快照 */
 public final class TranslationDiagnosticsSnapshot {
     private final boolean enabled;
     private final String configuredProvider;
@@ -134,6 +134,9 @@ public final class TranslationDiagnosticsSnapshot {
         if ("tencent-hunyuan".equalsIgnoreCase(provider)) {
             return translator.translate("value.universal_translator.provider_tencent");
         }
+        if ("deepseek".equalsIgnoreCase(provider)) {
+            return translator.translate("value.universal_translator.provider_deepseek");
+        }
         if (isCustomApiProvider(provider)) {
             return translator.translate("value.universal_translator.provider_llm");
         }
@@ -187,6 +190,9 @@ public final class TranslationDiagnosticsSnapshot {
         }
         if ("tencent-hunyuan".equalsIgnoreCase(provider)) {
             return "腾讯混元";
+        }
+        if ("deepseek".equalsIgnoreCase(provider)) {
+            return "DeepSeek";
         }
         if (isCustomApiProvider(provider)) {
             return "自定义 API";

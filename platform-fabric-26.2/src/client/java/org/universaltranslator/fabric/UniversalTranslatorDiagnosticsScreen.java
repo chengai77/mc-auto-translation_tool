@@ -8,7 +8,7 @@ import org.universaltranslator.core.TranslationDiagnosticsSnapshot;
 
 import java.util.List;
 
-/** Secret-free runtime diagnostics that update while the screen is open. */
+/** 运行时诊断页 */
 final class UniversalTranslatorDiagnosticsScreen extends Screen {
     private final Screen parent;
 

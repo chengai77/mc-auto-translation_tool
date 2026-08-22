@@ -9,7 +9,7 @@ import org.universaltranslator.core.TranslationDiagnosticsSnapshot;
 import java.io.IOException;
 import java.util.List;
 
-/** Secret-free runtime diagnostics shared by Forge 1.8.9 and 1.12.2. */
+/** 旧版诊断页 */
 final class LegacyDiagnosticsScreen extends GuiScreen {
     private static final int BACK = 1;
     private final GuiScreen parent;

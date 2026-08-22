@@ -254,7 +254,7 @@ public final class SignTranslationContext {
     }
 
     private static List<String> wrapSignText(String text, int maxLines, int maxWidth, WidthMeasurer measurer) {
-        List<String> segments = splitBracketSegments(text);
+        List<String> segments = VisualTextBoundaries.splitBracketSegments(text);
         if (segments.size() <= 1) {
             return wrapText(text, maxLines, maxWidth, measurer);
         }
@@ -274,38 +274,6 @@ public final class SignTranslationContext {
             lines.addAll(wrapText(value, slotsForThis, maxWidth, measurer));
         }
         return lines;
-    }
-
-    private static List<String> splitBracketSegments(String text) {
-        List<String> segments = new ArrayList<String>();
-        if (text == null || text.trim().isEmpty()) {
-            return segments;
-        }
-        int cursor = 0;
-        int index = 0;
-        while (index < text.length()) {
-            char close = matchingClose(text.charAt(index));
-            if (close == 0) {
-                index++;
-                continue;
-            }
-            addSegment(segments, text.substring(cursor, index));
-            int end = text.indexOf(close, index + 1);
-            if (end < 0) {
-                end = text.length() - 1;
-            }
-            addSegment(segments, text.substring(index, end + 1));
-            cursor = end + 1;
-            index = cursor;
-        }
-        addSegment(segments, text.substring(cursor));
-        return segments;
-    }
-
-    private static void addSegment(List<String> segments, String value) {
-        if (value != null && !value.trim().isEmpty()) {
-            segments.add(value.trim());
-        }
     }
 
     private static int remainingSegments(List<String> segments, int start) {
@@ -331,19 +299,6 @@ public final class SignTranslationContext {
             joined.append(value);
         }
         return joined.toString();
-    }
-
-    private static char matchingClose(char open) {
-        switch (open) {
-            case '\u300a': return '\u300b';
-            case '<': return '>';
-            case '\u300c': return '\u300d';
-            case '\u3010': return '\u3011';
-            case '[': return ']';
-            case '(': return ')';
-            case '\uff08': return '\uff09';
-            default: return 0;
-        }
     }
 
     private static List<String> wrapText(String text, int maxLines, int maxWidth, WidthMeasurer measurer) {

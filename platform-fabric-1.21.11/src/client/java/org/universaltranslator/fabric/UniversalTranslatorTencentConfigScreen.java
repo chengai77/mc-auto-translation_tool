@@ -6,7 +6,7 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 
-/** Local-only editor for Tencent Hunyuan credentials. */
+/** 混元凭证配置 */
 final class UniversalTranslatorTencentConfigScreen extends Screen {
     private final UniversalTranslatorConfigScreen parent;
     private final String initialSecretId;

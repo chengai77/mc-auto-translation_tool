@@ -3,6 +3,7 @@ package org.universaltranslator.core.provider;
 import org.universaltranslator.core.TranslationProvider;
 import org.universaltranslator.core.TranslationRequest;
 import org.universaltranslator.core.TranslationProviderStatus;
+import org.universaltranslator.core.TranslationOutputValidator;
 import org.universaltranslator.core.OfflineModel;
 import org.universaltranslator.core.offline.OfflineEngineAsset;
 import org.universaltranslator.core.offline.OfflineProcessSupport;
@@ -21,10 +22,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-/** Fully local provider using a loopback-only llama.cpp child process. */
+/** 本地llama.cpp */
 public final class LlamaCppOfflineProvider
         implements TranslationProvider, TranslationProviderStatus, AutoCloseable {
     private static final long STARTUP_FAILURE_RETRY_MILLIS = 5L * 60L * 1000L;
+    private static final String LITE_CACHE_REVISION = "compact-prompt-v1";
     public static final String DEFAULT_MODEL_ID = OfflineModel.LITE.modelId();
     public static final String DEFAULT_MODEL_FILE = OfflineModel.LITE.modelFile();
     public static final URI DEFAULT_MODEL_URI = URI.create(
@@ -125,7 +127,8 @@ public final class LlamaCppOfflineProvider
 
     @Override
     public String id() {
-        return "offline-llama:" + modelId;
+        return "offline-llama:" + modelId
+                + (DEFAULT_MODEL_ID.equals(modelId) ? ":" + LITE_CACHE_REVISION : "");
     }
 
     @Override
@@ -144,7 +147,9 @@ public final class LlamaCppOfflineProvider
             status = "离线模型运行中";
             return api.translate(request);
         } catch (Exception error) {
-            status = "离线翻译失败：" + safeMessage(error);
+            status = TranslationOutputValidator.isOutputValidationFailure(error)
+                    ? "离线模型运行中"
+                    : "离线翻译失败：" + safeMessage(error);
             throw error;
         }
     }
@@ -190,22 +195,23 @@ public final class LlamaCppOfflineProvider
         Path log = root.resolve("llama-server.log");
         long logStart = Files.isRegularFile(log) ? Files.size(log) : 0L;
         int processors = Runtime.getRuntime().availableProcessors();
-        // The model shares the machine with Minecraft's render thread. Two inference
-        // threads are enough for this small model and avoid sustained frame drops on
-        // legacy clients when a busy lobby exposes many labels at once.
+        // 限制推理线程
+        // 小模型两线程
+        // 避免掉帧
         int threads = Math.max(1, Math.min(2, processors / 2));
         status = "正在启动离线模型";
-        ProcessBuilder builder = new ProcessBuilder(
+        ProcessBuilder builder = new ProcessBuilder();
+        String modelArgument = OfflineProcessSupport.useRelativeModelPath(builder, model);
+        builder.command(
                 server.toString(),
-                "-m", model.toString(),
+                "-m", modelArgument,
                 "--host", "127.0.0.1",
                 "--port", Integer.toString(port),
                 "--alias", "universal-translator-local",
-                "--ctx-size", "1024",
+                "--ctx-size", "2048",
                 "--parallel", "1",
                 "--threads", Integer.toString(threads),
                 "--threads-batch", Integer.toString(threads));
-        builder.directory(server.getParent().toFile());
         OfflineProcessSupport.configureLibraryPath(builder, server.getParent());
         builder.redirectErrorStream(true);
         builder.redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile()));
@@ -219,7 +225,7 @@ public final class LlamaCppOfflineProvider
         }
         localApi = new OpenAiChatTranslationProvider(
                 "http://127.0.0.1:" + port + "/v1/chat/completions",
-                "", "universal-translator-local", "offline-loopback",
+                "", "universal-translator-local", "offline-loopback:" + modelId,
                 new org.universaltranslator.core.net.HttpJsonClient(1_000, 15_000));
         nextStartupAttemptAt = 0L;
         startupFailureMessage = "";
@@ -303,7 +309,8 @@ public final class LlamaCppOfflineProvider
 
     private VerifiedDownloader.ProgressListener progressListener(final String stage) {
         progressStage = stage;
-        progressPercent = -1;
+        progressPercent = 0;
+        status = stage + "：0%";
         return new VerifiedDownloader.ProgressListener() {
             @Override
             public void onProgress(long downloadedBytes, long totalBytes) {
@@ -312,13 +319,10 @@ public final class LlamaCppOfflineProvider
                 }
                 int percent = (int) Math.min(100L, downloadedBytes * 100L / totalBytes);
                 int previous = progressPercent;
-                if (!stage.equals(progressStage) || previous < 0
-                        || percent < previous || percent >= 100 || percent >= previous + 5) {
+                if (!stage.equals(progressStage) || percent != previous) {
                     progressStage = stage;
                     progressPercent = percent;
-                    status = stage + "：" + percent + "%（"
-                            + downloadedBytes / 1_000_000L + "/"
-                            + totalBytes / 1_000_000L + " MB）";
+                    status = stage + "：" + percent + "%";
                 }
             }
         };
@@ -418,8 +422,8 @@ public final class LlamaCppOfflineProvider
             Runtime.getRuntime().addShutdownHook(hook);
             shutdownHook = hook;
         } catch (IllegalStateException shuttingDown) {
-            // The JVM is already stopping. Do not allow a newly-started model
-            // process to survive after Minecraft exits.
+            // 关闭即停模型
+            // 退出不留进程
             closeProcess(false);
         }
     }
@@ -436,7 +440,7 @@ public final class LlamaCppOfflineProvider
             try {
                 Runtime.getRuntime().removeShutdownHook(hook);
             } catch (IllegalStateException ignored) {
-                // JVM shutdown has already started; the hook may be running.
+                // 关闭钩子进行中
             }
         }
         Process child = process;

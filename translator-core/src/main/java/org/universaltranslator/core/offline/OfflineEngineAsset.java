@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
-/** Pinned llama.cpp CPU builds for the desktop platforms supported by the mod. */
+/** 离线引擎清单 */
 public final class OfflineEngineAsset {
     private static final String RELEASE = "b9637";
     private static final String BASE = "https://github.com/ggml-org/llama.cpp/releases/download/"
@@ -60,7 +60,7 @@ public final class OfflineEngineAsset {
         throw new IllegalStateException("Offline translation is not packaged for " + os + " / " + arch);
     }
 
-    /** A checksum-pinned acceleration source followed by the official GitHub release. */
+    /** 校验加速源 */
     public List<URI> downloadSources() {
         return Arrays.asList(acceleratedUri, uri);
     }

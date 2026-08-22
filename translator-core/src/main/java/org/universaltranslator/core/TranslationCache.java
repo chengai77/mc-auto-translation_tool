@@ -1,9 +1,12 @@
 package org.universaltranslator.core;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Properties;
 
-/** Thread-safe bounded in-memory LRU cache. A disk-backed layer will wrap this later. */
+/** 线程安全LRU缓存 */
 public final class TranslationCache implements TranslationStore {
     private final Map<String, String> entries;
 
@@ -21,7 +24,8 @@ public final class TranslationCache implements TranslationStore {
 
     @Override
     public synchronized String get(String key) {
-        return entries.get(key);
+        String value = entries.get(key);
+        return value == null ? entries.get(TranslationCacheFile.hashKey(key)) : value;
     }
 
     @Override
@@ -36,5 +40,22 @@ public final class TranslationCache implements TranslationStore {
     @Override
     public synchronized void clear() {
         entries.clear();
+    }
+
+    public synchronized int importFrom(Path source) throws IOException {
+        Properties properties = TranslationCacheFile.read(source);
+        int imported = 0;
+        for (String key : properties.stringPropertyNames()) {
+            String value = properties.getProperty(key);
+            if (key != null && value != null && !key.trim().isEmpty()) {
+                entries.put(key, value);
+                imported++;
+            }
+        }
+        return imported;
+    }
+
+    public synchronized Path exportTo(Path target) throws IOException {
+        return TranslationCacheFile.write(target, entries);
     }
 }

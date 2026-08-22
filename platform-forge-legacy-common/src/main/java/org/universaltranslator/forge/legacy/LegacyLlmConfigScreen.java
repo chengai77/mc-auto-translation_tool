@@ -8,7 +8,7 @@ import net.minecraft.client.resources.I18n;
 
 import java.io.IOException;
 
-/** Custom OpenAI-compatible API settings shared by Forge 1.8.9 and 1.12.2. */
+/** 旧版自定义API */
 final class LegacyLlmConfigScreen extends GuiScreen {
     private static final int SAVE = 1;
     private static final int CANCEL = 2;

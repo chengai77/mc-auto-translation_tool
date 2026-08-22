@@ -7,7 +7,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.util.EnumSet;
 import java.util.Set;
 
-/** Best-effort owner-only permissions for local configuration files that may contain API credentials. */
+/** 配置仅属主可写 */
 public final class LocalConfigSecurity {
     private LocalConfigSecurity() {
     }
@@ -19,11 +19,11 @@ public final class LocalConfigSecurity {
         try {
             Files.setPosixFilePermissions(file, permissions);
         } catch (IOException ignored) {
-            // Some launchers and filesystems do not expose POSIX permissions.
+            // 无POSIX权限
         } catch (UnsupportedOperationException ignored) {
-            // Windows and non-POSIX filesystems use their existing ACLs.
+            // 沿用系统ACL
         } catch (SecurityException ignored) {
-            // Translation remains usable if the launcher denies permission changes.
+            // 改权限失败可用
         }
     }
 }

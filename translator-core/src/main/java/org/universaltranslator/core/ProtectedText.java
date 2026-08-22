@@ -28,11 +28,9 @@ public final class ProtectedText {
                     + "(?::\\d{1,5})?(?![A-Za-z0-9_.-])";
     private static final String LOCALHOST_SOURCE =
             "(?<![A-Za-z0-9_.-])localhost(?::\\d{1,5})?(?![A-Za-z0-9_.-])";
-    private static final String INLINE_TEXTURE_SOURCE =
-            "(?:\\[(?:[A-Za-z0-9_.-]+:)?[A-Za-z0-9_.-]+/[A-Za-z0-9_./:-]+\\])";
     private static final String PROTECTED_SOURCE =
             "(?:\\u00a7[0-9A-FK-ORa-fk-or])" +
-            "|(?:" + INLINE_TEXTURE_SOURCE + ")" +
+            "|(?:" + InlineTextureCode.REGEX_SOURCE + ")" +
             "|(?:https?://\\S+|www\\.\\S+)" +
             "|(?:" + BRACKETED_IPV6_SOURCE + "|" + IPV4_SOURCE + "|" + RAW_IPV6_SOURCE
                     + "|" + DOMAIN_SOURCE + "|" + LOCALHOST_SOURCE + ")" +
@@ -142,7 +140,7 @@ public final class ProtectedText {
         return INTERNAL_TOKEN.matcher(template).replaceAll("");
     }
 
-    /** Returns exact protected values and translatable text as separate ordered parts. */
+    /** 拆分保护与译文 */
     List<Segment> getSegments() {
         List<Segment> segments = new ArrayList<Segment>();
         Matcher matcher = INTERNAL_TOKEN.matcher(template);
@@ -166,7 +164,8 @@ public final class ProtectedText {
     }
 
     public String restore(String translatedTemplate) {
-        String restored = translatedTemplate;
+        String restored = TranslationOutputValidator.canonicalizeProtectedTokens(
+                translatedTemplate);
         for (int i = 0; i < values.size(); i++) {
             restored = restored.replace(token(i), values.get(i));
         }

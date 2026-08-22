@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Platform-specific process setup and compact diagnostics for the local llama.cpp server. */
+/** 离线进程管理 */
 public final class OfflineProcessSupport {
     public static final int WINDOWS_MISSING_DEPENDENCY_EXIT = 0xC0000135;
     private static final int MAX_LOG_BYTES = 16 * 1024;
@@ -37,7 +37,22 @@ public final class OfflineProcessSupport {
         prependWindowsLibraryPath(builder, serverDirectory, javaBin);
     }
 
-    /** Visible for dependency-free regression tests. */
+    /** 使用模型相对路径 */
+    public static String useRelativeModelPath(ProcessBuilder builder, Path model) {
+        if (builder == null || model == null) {
+            throw new IllegalArgumentException("Process builder and model are required");
+        }
+        Path normalized = model.toAbsolutePath().normalize();
+        Path parent = normalized.getParent();
+        Path fileName = normalized.getFileName();
+        if (parent == null || fileName == null) {
+            throw new IllegalArgumentException("Model file must have a parent directory");
+        }
+        builder.directory(parent.toFile());
+        return fileName.toString();
+    }
+
+    /** 供测试可见 */
     public static void prependWindowsLibraryPath(
             ProcessBuilder builder,
             Path serverDirectory,
@@ -81,7 +96,7 @@ public final class OfflineProcessSupport {
         entries.add(normalized);
     }
 
-    /** Reads only output written by the current startup attempt. */
+    /** 仅读本次启动 */
     public static String readNewLogTail(Path log, long attemptStartedAtByte) {
         if (log == null || !Files.isRegularFile(log)) {
             return "";
@@ -98,7 +113,7 @@ public final class OfflineProcessSupport {
             try (SeekableByteChannel channel = Files.newByteChannel(log, StandardOpenOption.READ)) {
                 channel.position(start);
                 while (buffer.hasRemaining() && channel.read(buffer) >= 0) {
-                    // Keep reading until the requested tail is complete or EOF is reached.
+                    // 读至尾部
                 }
             }
             buffer.flip();

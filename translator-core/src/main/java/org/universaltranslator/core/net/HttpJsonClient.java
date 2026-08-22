@@ -10,7 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Map;
 
-/** Bounded Java 8 HTTP client used to avoid shipping a large networking dependency. */
+/** 轻量HTTP客户端 */
 public final class HttpJsonClient {
     private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
     private final int connectTimeoutMillis;

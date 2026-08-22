@@ -3,7 +3,7 @@ package org.universaltranslator.core;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
-/** Keeps recently typed client messages out of render-time translation. */
+/** 排除已翻译输入 */
 public final class RecentUserText {
     private static final int MAX_ENTRIES = 128;
     private static final long RETAIN_MILLIS = 30L * 60L * 1_000L;

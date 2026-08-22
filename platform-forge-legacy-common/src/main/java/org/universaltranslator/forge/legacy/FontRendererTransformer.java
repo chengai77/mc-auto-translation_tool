@@ -7,7 +7,7 @@ import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
-/** Injects one string substitution call into FontRenderer render and width methods. */
+/** 字体替换注入 */
 public final class FontRendererTransformer implements IClassTransformer {
     private static final String FONT_RENDERER = "net.minecraft.client.gui.FontRenderer";
     private static final String CHAT_HUD = "net.minecraft.client.gui.GuiNewChat";
@@ -59,7 +59,7 @@ public final class FontRendererTransformer implements IClassTransformer {
         }
     }
 
-    /** Keeps the live sign preview local while GuiEditSign renders it. */
+    /** 签名预览本地 */
     private static final class SignInputVisitor extends CountingVisitor {
         private static final String CONTEXT =
                 "org/universaltranslator/forge/legacy/LegacyRenderContext";
@@ -104,7 +104,7 @@ public final class FontRendererTransformer implements IClassTransformer {
         }
     }
 
-    /** Keeps every GuiTextField value local and untranslated while it is drawn/measured. */
+    /** 文本框本地化 */
     private static final class TextInputVisitor extends CountingVisitor {
         private static final String CONTEXT =
                 "org/universaltranslator/forge/legacy/LegacyRenderContext";
@@ -145,7 +145,7 @@ public final class FontRendererTransformer implements IClassTransformer {
         }
     }
 
-    /** Marks chat rendering and translates the complete component before vanilla wraps it. */
+    /** 聊天整体翻译 */
     private abstract static class CountingVisitor extends ClassVisitor {
         private int modifiedMethods;
 
@@ -272,7 +272,7 @@ public final class FontRendererTransformer implements IClassTransformer {
         }
     }
 
-    /** Translates item name/lore lists before vanilla measures and renders the tooltip. */
+    /** 提示前翻译 */
     private static final class TooltipVisitor extends CountingVisitor {
         private static final String CONTEXT =
                 "org/universaltranslator/forge/legacy/LegacyRenderContext";
@@ -302,8 +302,8 @@ public final class FontRendererTransformer implements IClassTransformer {
             if (itemTooltipFactory) {
                 return itemTooltipFactoryVisitor(delegate);
             }
-            // Production jars still contain Notch class names in descriptors when coremods run.
-            // zx is ItemStack in 1.8.9; aip is ItemStack in 1.12.2.
+            // 保留原类名
+            // 版本类名差异
             boolean itemTooltip = (descriptor.startsWith("(Lnet/minecraft/item/ItemStack;")
                     || descriptor.startsWith("(Lzx;")
                     || descriptor.startsWith("(Laip;"))
@@ -354,8 +354,8 @@ public final class FontRendererTransformer implements IClassTransformer {
                         int opcode, String owner, String name, String descriptor, boolean isInterface) {
                     super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
                     boolean itemStackTooltip = isItemStackOwner(owner)
-                            // 1.8.9 uses (EntityPlayer, boolean); 1.12.2 uses
-                            // (EntityPlayer, ITooltipFlag). Both return the canonical list.
+                            // 版本签名差异
+                            // 均返回标准列表
                             && descriptor.endsWith(")Ljava/util/List;")
                             && ("getTooltip".equals(name)
                             || "func_82840_a".equals(name)
@@ -376,7 +376,7 @@ public final class FontRendererTransformer implements IClassTransformer {
             };
         }
 
-        /** 1.12.2 centralizes item tooltip creation in GuiScreen.getItemToolTip. */
+        /** 1.12.2提示入口 */
         private MethodVisitor itemTooltipFactoryVisitor(MethodVisitor delegate) {
             return new MethodVisitor(Opcodes.ASM5, delegate) {
                 private boolean injected;

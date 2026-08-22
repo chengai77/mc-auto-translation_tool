@@ -1,5 +1,8 @@
 buildscript {
     repositories {
+        maven { url = uri("../../downloads/maven-local") }
+        maven { url = "https://maven.aliyun.com/repository/public" }
+        maven { url = "https://maven.aliyun.com/repository/gradle-plugin" }
         maven { url = "https://maven.minecraftforge.net" }
         mavenCentral()
     }
@@ -9,6 +12,13 @@ buildscript {
 }
 
 apply plugin: "net.minecraftforge.gradle"
+
+repositories {
+    maven { url = uri("../../downloads/maven-local") }
+    maven { url = "https://maven.aliyun.com/repository/public" }
+    maven { url = "https://maven.minecraftforge.net" }
+    mavenCentral()
+}
 
 version = "1.1"
 group = "org.universaltranslator"

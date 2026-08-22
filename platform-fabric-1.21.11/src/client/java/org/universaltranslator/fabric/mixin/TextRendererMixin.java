@@ -1,6 +1,5 @@
 package org.universaltranslator.fabric.mixin;
 
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.text.OrderedText;
 import net.minecraft.text.StringVisitable;
@@ -10,9 +9,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.universaltranslator.core.TextKind;
 import org.universaltranslator.fabric.RenderedTextBridge;
+import org.universaltranslator.fabric.TranslationBypassText;
 import org.universaltranslator.fabric.TranslationRenderContext;
 
-/** Captures world-space text such as nameplates, holograms, signs and display entities. */
+/** 捕获世界文本 */
 @Mixin(TextRenderer.class)
 abstract class TextRendererMixin {
     @Shadow
@@ -30,12 +30,15 @@ abstract class TextRendererMixin {
             method = "prepare(Lnet/minecraft/text/OrderedText;FFIZZI)Lnet/minecraft/client/font/TextRenderer$GlyphDrawable;",
             at = @At("HEAD"), argsOnly = true)
     private OrderedText universalTranslator$translatePreparedOrderedText(OrderedText text) {
+        if (TranslationBypassText.isWrapped(text)) {
+            return text;
+        }
         return RenderedTextBridge.translate(
                 text, this::getWidth, TranslationRenderContext.currentOr(defaultKind()));
     }
 
     private static TextKind defaultKind() {
-        return MinecraftClient.getInstance().currentScreen == null ? TextKind.HOLOGRAM : TextKind.OTHER;
+        return TextKind.OTHER;
     }
 
     @ModifyVariable(method = "getWidth(Ljava/lang/String;)I", at = @At("HEAD"), argsOnly = true)

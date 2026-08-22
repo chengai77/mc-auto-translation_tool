@@ -4,7 +4,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Iterator;
 
-/** Small bounded context memory for provider prompts. */
+/** 提示词上下文 */
 final class RecentTranslationContext {
     private static final int MAX_ENTRIES = 8;
     private static final int MAX_TEXT_LENGTH = 80;
@@ -62,7 +62,8 @@ final class RecentTranslationContext {
         if (value == null) {
             return "";
         }
-        String cleaned = TranslationTextStyling.stripLegacyFormatting(value)
+        String cleaned = StyledTranslationTemplate.strip(
+                InlineTextureCode.strip(TranslationTextStyling.stripLegacyFormatting(value)))
                 .replaceAll("__UT_\\d+__", "")
                 .replace('\n', ' ')
                 .replace('\r', ' ')

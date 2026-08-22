@@ -14,7 +14,7 @@ import org.universaltranslator.core.TranslationStatusLocalizer;
 
 import java.io.File;
 
-/** Forge 1.8.9/1.12.2 compatible key binding and settings-screen launcher. */
+/** 按键与设置入口 */
 public final class LegacyClientEvents {
     private static final long FAILURE_NOTIFICATION_COOLDOWN_MILLIS = 60_000L;
     private static final LegacyClientEvents INSTANCE = new LegacyClientEvents();

@@ -3,8 +3,9 @@ package org.universaltranslator.core.provider;
 import org.universaltranslator.core.TranslationProvider;
 import org.universaltranslator.core.TranslationRequest;
 import org.universaltranslator.core.TranslationProviderStatus;
+import org.universaltranslator.core.TranslationOutputValidator;
 
-/** Tries a privacy-preserving primary provider before an optional online fallback. */
+/** 优先隐私引擎 */
 public final class FallbackTranslationProvider
         implements TranslationProvider, TranslationProviderStatus, AutoCloseable {
     private final TranslationProvider primary;
@@ -45,14 +46,27 @@ public final class FallbackTranslationProvider
         } catch (Exception primaryFailure) {
             try {
                 String translated = fallback.translate(request);
-                lastStatus = "主翻译服务失败，已使用 API 回退";
+                lastStatus = TranslationOutputValidator
+                        .isOutputValidationFailure(primaryFailure)
+                        ? primaryStatus() : "主翻译服务失败，已使用 API 回退";
                 return translated;
             } catch (Exception fallbackFailure) {
-                lastStatus = "主翻译服务和 API 回退均失败";
+                boolean onlyInvalidOutput = TranslationOutputValidator
+                        .isOutputValidationFailure(primaryFailure)
+                        && TranslationOutputValidator
+                        .isOutputValidationFailure(fallbackFailure);
+                lastStatus = onlyInvalidOutput
+                        ? primaryStatus() : "主翻译服务和 API 回退均失败";
                 fallbackFailure.addSuppressed(primaryFailure);
                 throw fallbackFailure;
             }
         }
+    }
+
+    private String primaryStatus() {
+        return primary instanceof TranslationProviderStatus
+                ? ((TranslationProviderStatus) primary).status()
+                : "主翻译服务运行中";
     }
 
     @Override

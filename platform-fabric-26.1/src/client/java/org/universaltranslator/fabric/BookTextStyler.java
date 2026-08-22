@@ -13,7 +13,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,7 +24,8 @@ final class BookTextStyler {
     private BookTextStyler() {
     }
 
-    static Component rebuild(Component source, String translated, Style fallbackStyle) {
+    static Component rebuild(
+            Component source, String translated, Style fallbackStyle, TextKind kind) {
         if (source == null || translated == null || translated.isEmpty()) {
             return null;
         }
@@ -38,7 +38,7 @@ final class BookTextStyler {
             return Component.literal(translated).setStyle(displayStyle(sourceRuns.get(0).style()));
         }
         Style plainStyle = displayStyle(styled.plainStyle(fallbackStyle));
-        List<TargetRun> targets = targetRuns(styled.text(), translated, sourceRuns);
+        List<TargetRun> targets = targetRuns(styled.text(), translated, sourceRuns, kind);
         if (targets.isEmpty()) {
             return Component.literal(translated).setStyle(plainStyle);
         }
@@ -48,7 +48,8 @@ final class BookTextStyler {
     private static List<TargetRun> targetRuns(
             String original,
             String translated,
-            List<StyledRun> sourceRuns
+            List<StyledRun> sourceRuns,
+            TextKind kind
     ) {
         List<TargetRun> targets = new ArrayList<TargetRun>();
         int limit = Math.min(sourceRuns.size(), MAX_STYLED_RUNS);
@@ -63,7 +64,7 @@ final class BookTextStyler {
             boolean interactive = run.isInteractive();
             boolean globalFallback = !interactive;
             boolean positionalFallback = globalFallback || interactiveRunsOnLine(original, sourceRuns, line) == 1;
-            String fragment = translatedFragment(sourceText);
+            String fragment = kind == TextKind.BOOK ? translatedFragment(sourceText) : sourceText;
             if (!fragment.equals(sourceText)
                     && addCandidateTarget(translated, fragment, run.style(), preferred, targets, line, globalFallback)) {
                 continue;
@@ -352,14 +353,12 @@ final class BookTextStyler {
     private static StyledText styledText(Component source, Style fallbackStyle) {
         final StringBuilder value = new StringBuilder();
         final List<StyleSpan> spans = new ArrayList<StyleSpan>();
-        source.visit((style, part) -> {
-            if (part != null && !part.isEmpty()) {
-                int start = value.length();
-                value.append(part);
-                spans.add(new StyleSpan(start, value.length(), style == null ? Style.EMPTY : style));
-            }
-            return Optional.empty();
-        }, Style.EMPTY);
+        for (InlineTextureText.StyledPart part :
+                InlineTextureText.styledParts(source, fallbackStyle)) {
+            int start = value.length();
+            value.append(part.text());
+            spans.add(new StyleSpan(start, value.length(), part.style()));
+        }
         return new StyledText(value.toString(), spans, fallbackStyle);
     }
 

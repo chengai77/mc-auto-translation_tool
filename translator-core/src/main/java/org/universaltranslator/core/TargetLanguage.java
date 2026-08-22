@@ -2,7 +2,7 @@ package org.universaltranslator.core;
 
 import java.util.Locale;
 
-/** Shared target-language presets and provider-specific language mappings. */
+/** 目标语言预设 */
 public final class TargetLanguage {
     public static final String SIMPLIFIED_CHINESE = "zh-CN";
     public static final String TRADITIONAL_CHINESE = "zh-TW";

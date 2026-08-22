@@ -1,6 +1,6 @@
 package org.universaltranslator.core;
 
-/** Optional human-readable state exposed by providers with background installation or startup work. */
+/** 引擎状态接口 */
 public interface TranslationProviderStatus {
     String status();
 }

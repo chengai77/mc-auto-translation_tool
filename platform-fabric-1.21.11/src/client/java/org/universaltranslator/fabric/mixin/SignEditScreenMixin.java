@@ -8,7 +8,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.universaltranslator.fabric.TranslationRenderContext;
 
-/** Keeps the local sign editor preview untranslated until the player saves it. */
+/** 签名预览本地 */
 @Mixin(AbstractSignEditScreen.class)
 abstract class SignEditScreenMixin {
     @Inject(

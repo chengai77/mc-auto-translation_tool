@@ -13,7 +13,7 @@ import org.universaltranslator.core.TargetLanguage;
 import org.universaltranslator.core.TranslationStatusLocalizer;
 import org.universaltranslator.core.TranslationTextColor;
 
-/** Dependency-free settings UI shared by Forge 1.8.9 and 1.12.2. */
+/** 旧版设置页 */
 final class LegacyConfigScreen extends GuiScreen {
     private static final int ENABLED = 1;
     private static final int CACHE = 2;
@@ -24,37 +24,27 @@ final class LegacyConfigScreen extends GuiScreen {
     private static final int PROVIDER = 7;
     private static final int DISPLAY = 8;
     private static final int DOWNLOAD = 9;
-    private static final int FALLBACK = 10;
+    private static final int CACHE_EDITOR = 15;
     private static final int MIXED_TEXT = 11;
     private static final int COLOR = 12;
     private static final int OUTGOING = 13;
     private static final int MODEL = 14;
-    private static final int DIAGNOSTICS = 15;
     private static final int TARGET_LANGUAGE = 16;
 
     private final GuiScreen parent;
     private final LegacyConfig original;
-    private boolean enabled;
-    private boolean translateChat;
-    private boolean translateOther;
-    private boolean translateOutgoing;
-    private boolean diskCache;
-    private boolean offlineAutoDownload;
+    private boolean enabled, translateChat, translateOther, translateOutgoing;
+    private boolean diskCache, offlineAutoDownload, translateEnglishOnly;
     private OfflineModel offlineModel;
-    private boolean apiFallback;
     private TranslationDisplayMode displayMode;
-    private boolean translateEnglishOnly;
     private TranslationTextColor translatedTextColor;
-    private String provider;
-    private String llmEndpoint;
-    private String llmApiKey;
-    private String llmModel;
-    private String tencentSecretId;
-    private String tencentSecretKey;
-    private String tencentModel;
-    private GuiTextField targetLanguage;
-    private GuiTextField outgoingTargetLanguage;
-    private GuiTextField endpoint;
+    private String provider, llmEndpoint, llmApiKey, llmModel;
+    private String tencentSecretId, tencentSecretKey, tencentModel;
+    private String deepSeekApiKey, deepSeekModel;
+    private String dashScopeApiKey, dashScopeModel;
+    private String zhipuApiKey, zhipuModel;
+    private String kimiApiKey, kimiModel;
+    private GuiTextField targetLanguage, endpoint;
     private FontRenderer renderer;
     private String status = "";
 
@@ -68,7 +58,6 @@ final class LegacyConfigScreen extends GuiScreen {
         this.diskCache = config.diskCache;
         this.offlineAutoDownload = config.offlineAutoDownload;
         this.offlineModel = config.offlineModel;
-        this.apiFallback = config.apiFallback;
         this.displayMode = config.displayMode;
         this.translateEnglishOnly = config.translateEnglishOnly;
         this.translatedTextColor = config.translatedTextColor;
@@ -79,15 +68,21 @@ final class LegacyConfigScreen extends GuiScreen {
         this.tencentSecretId = config.tencentSecretId;
         this.tencentSecretKey = config.tencentSecretKey;
         this.tencentModel = config.tencentModel;
+        this.deepSeekApiKey = config.deepSeekApiKey;
+        this.deepSeekModel = config.deepSeekModel;
+        this.dashScopeApiKey = config.dashScopeApiKey;
+        this.dashScopeModel = config.dashScopeModel;
+        this.zhipuApiKey = config.zhipuApiKey;
+        this.zhipuModel = config.zhipuModel;
+        this.kimiApiKey = config.kimiApiKey;
+        this.kimiModel = config.kimiModel;
     }
 
     @Override
     public void initGui() {
         String targetValue = targetLanguage == null
-                ? original.targetLanguage : targetLanguage.getText();
+                ? defaultTargetLanguage(original.targetLanguage) : targetLanguage.getText();
         String endpointValue = endpoint == null ? original.endpoint : endpoint.getText();
-        String outgoingTargetValue = outgoingTargetLanguage == null
-                ? original.outgoingTargetLanguage : outgoingTargetLanguage.getText();
         buttonList.clear();
         renderer = LegacyVersionAccess.fontRenderer();
         Layout layout = layout();
@@ -101,10 +96,9 @@ final class LegacyConfigScreen extends GuiScreen {
         buttonList.add(new GuiButton(MIXED_TEXT, left, layout.row(3), layout.buttonWidth, 20, ""));
         buttonList.add(new GuiButton(COLOR, layout.right, layout.row(3), layout.buttonWidth, 20, ""));
         buttonList.add(new GuiButton(DOWNLOAD, left, layout.row(4), layout.buttonWidth, 20, ""));
-        buttonList.add(new GuiButton(FALLBACK, layout.right, layout.row(4), layout.buttonWidth, 20, ""));
+        buttonList.add(new GuiButton(OUTGOING, layout.right, layout.row(4), layout.buttonWidth, 20, ""));
         buttonList.add(new GuiButton(MODEL, left, layout.row(5), layout.buttonWidth, 20, ""));
-        buttonList.add(new GuiButton(DIAGNOSTICS, layout.right, layout.row(5),
-                layout.buttonWidth, 20, tr("screen.universal_translator.diagnostics.title")));
+        buttonList.add(new GuiButton(CACHE_EDITOR, layout.right, layout.row(5), layout.buttonWidth, 20, ""));
         int presetWidth = Math.max(46, Math.min(68, layout.buttonWidth / 2));
         int languageWidth = layout.buttonWidth - presetWidth - 4;
         targetLanguage = new GuiTextField(20, renderer, left, layout.targetY, languageWidth, 20);
@@ -112,15 +106,9 @@ final class LegacyConfigScreen extends GuiScreen {
         targetLanguage.setText(targetValue);
         buttonList.add(new GuiButton(TARGET_LANGUAGE, left + languageWidth + 4, layout.targetY,
                 presetWidth, 20, ""));
-        buttonList.add(new GuiButton(OUTGOING, layout.right, layout.targetY,
-                layout.buttonWidth, 20, ""));
         endpoint = new GuiTextField(21, renderer, left, layout.endpointY, layout.buttonWidth, 20);
         endpoint.setMaxStringLength(512);
         endpoint.setText(endpointValue);
-        outgoingTargetLanguage = new GuiTextField(
-                22, renderer, layout.right, layout.endpointY, layout.buttonWidth, 20);
-        outgoingTargetLanguage.setMaxStringLength(32);
-        outgoingTargetLanguage.setText(outgoingTargetValue);
         buttonList.add(new GuiButton(SAVE, left, layout.saveY, layout.buttonWidth, 20,
                 tr("screen.universal_translator.save")));
         buttonList.add(new GuiButton(CANCEL, layout.right, layout.saveY, layout.buttonWidth, 20,
@@ -139,7 +127,8 @@ final class LegacyConfigScreen extends GuiScreen {
         } else if (button.id == OTHER) {
             translateOther = !translateOther;
         } else if (button.id == PROVIDER) {
-            provider = nextProvider(provider);
+            mc.displayGuiScreen(new LegacyProviderScreen(this));
+            return;
         } else if (button.id == DISPLAY) {
             displayMode = displayMode == TranslationDisplayMode.ORIGINAL_AND_TRANSLATED
                     ? TranslationDisplayMode.TRANSLATED_ONLY
@@ -152,21 +141,22 @@ final class LegacyConfigScreen extends GuiScreen {
             if (isLlm()) {
                 mc.displayGuiScreen(new LegacyLlmConfigScreen(
                         this, llmEndpoint, llmModel, !llmApiKey.isEmpty()));
+            } else if (isOfficialProvider()) {
+                mc.displayGuiScreen(new LegacyDeepSeekConfigScreen(
+                        this, provider, officialModel(provider), !officialApiKey(provider).isEmpty()));
             } else if (isTencent()) {
                 mc.displayGuiScreen(new LegacyTencentConfigScreen(
                         this, tencentSecretId, tencentModel, !tencentSecretKey.isEmpty()));
             } else {
                 offlineAutoDownload = !offlineAutoDownload;
             }
-        } else if (button.id == FALLBACK) {
-            apiFallback = !apiFallback;
+        } else if (button.id == CACHE_EDITOR) {
+            mc.displayGuiScreen(new LegacyCacheScreen(this));
+            return;
         } else if (button.id == OUTGOING) {
             translateOutgoing = !translateOutgoing;
         } else if (button.id == MODEL) {
             offlineModel = offlineModel.next();
-        } else if (button.id == DIAGNOSTICS) {
-            mc.displayGuiScreen(new LegacyDiagnosticsScreen(this));
-            return;
         } else if (button.id == TARGET_LANGUAGE) {
             targetLanguage.setText(TargetLanguage.nextPreset(targetLanguage.getText()));
         } else if (button.id == SAVE) {
@@ -182,7 +172,7 @@ final class LegacyConfigScreen extends GuiScreen {
         button(CHAT).displayString = tr("screen.universal_translator.option.chat", onOff(translateChat));
         button(OTHER).displayString = tr("screen.universal_translator.option.other", onOff(translateOther));
         button(CACHE).displayString = tr("screen.universal_translator.option.cache", onOff(diskCache));
-        button(PROVIDER).displayString = tr("screen.universal_translator.option.provider", providerLabel());
+        button(PROVIDER).displayString = tr("screen.universal_translator.option.change_provider");
         button(DISPLAY).displayString = tr("screen.universal_translator.option.display",
                 tr(displayMode == TranslationDisplayMode.ORIGINAL_AND_TRANSLATED
                         ? "value.universal_translator.display_bilingual"
@@ -191,17 +181,18 @@ final class LegacyConfigScreen extends GuiScreen {
         button(COLOR).displayString = tr("screen.universal_translator.option.color", colorLabel(translatedTextColor));
         button(DOWNLOAD).displayString = isLlm()
                 ? tr("screen.universal_translator.option.llm_settings")
+                : (isOfficialProvider()
+                ? tr("screen.universal_translator.option.official_settings", providerLabel())
                 : (isTencent()
                 ? tr("screen.universal_translator.option.tencent_settings")
-                : tr("screen.universal_translator.option.download", onOff(offlineAutoDownload)));
+                : tr("screen.universal_translator.option.download", onOff(offlineAutoDownload))));
         button(MODEL).displayString = tr("screen.universal_translator.option.model", offlineModel.displayName());
-        button(FALLBACK).displayString = tr("screen.universal_translator.option.fallback", onOff(apiFallback));
         button(OUTGOING).displayString = tr("screen.universal_translator.option.outgoing", onOff(translateOutgoing));
+        button(CACHE_EDITOR).displayString = tr("screen.universal_translator.option.cache_editor");
         button(TARGET_LANGUAGE).displayString = tr("screen.universal_translator.option.target_preset",
                 TargetLanguage.displayName(targetLanguage.getText()));
-        button(DOWNLOAD).enabled = isOffline() || isLlm() || isTencent();
+        button(DOWNLOAD).enabled = isOffline() || isLlm() || isOfficialProvider() || isTencent();
         button(MODEL).enabled = isOffline();
-        button(FALLBACK).enabled = isOffline();
     }
 
     private GuiButton button(int id) {
@@ -227,18 +218,23 @@ final class LegacyConfigScreen extends GuiScreen {
             if (targetLanguage.getText().trim().isEmpty()) {
                 throw new IllegalArgumentException(tr("error.universal_translator.target_required"));
             }
-            if (translateOutgoing && outgoingTargetLanguage.getText().trim().isEmpty()) {
-                throw new IllegalArgumentException(tr("error.universal_translator.outgoing_target_required"));
-            }
             String selectedProvider = isLlm() ? "custom-api" : provider;
             if ("custom-api".equalsIgnoreCase(selectedProvider)
                     && (llmEndpoint.trim().isEmpty() || llmModel.trim().isEmpty())) {
                 throw new IllegalArgumentException(tr("error.universal_translator.llm_required"));
             }
+            if (LegacyConfig.isOfficialProvider(selectedProvider)
+                    && (officialApiKey(selectedProvider).trim().isEmpty() || officialModel(selectedProvider).trim().isEmpty())) {
+                throw new IllegalArgumentException(tr("error.universal_translator.official_required"));
+            }
             LegacyConfig updated = buildConfig();
             if (updated.enabled && "tencent-hunyuan".equalsIgnoreCase(updated.provider)
                     && (updated.tencentSecretId.isEmpty() || updated.tencentSecretKey.isEmpty())) {
                 throw new IllegalArgumentException(tr("error.universal_translator.tencent_credentials"));
+            }
+            if (updated.enabled && LegacyConfig.isOfficialProvider(updated.provider)
+                    && updated.officialApiKey(updated.provider).isEmpty()) {
+                throw new IllegalArgumentException(tr("error.universal_translator.official_credentials"));
             }
             if (updated.enabled) {
                 updated.validateProviderConfiguration();
@@ -263,14 +259,12 @@ final class LegacyConfigScreen extends GuiScreen {
     public void updateScreen() {
         targetLanguage.updateCursorCounter();
         endpoint.updateCursorCounter();
-        outgoingTargetLanguage.updateCursorCounter();
     }
 
     @Override
     protected void keyTyped(char typedChar, int keyCode) throws IOException {
         if (targetLanguage.textboxKeyTyped(typedChar, keyCode)
-                || endpoint.textboxKeyTyped(typedChar, keyCode)
-                || outgoingTargetLanguage.textboxKeyTyped(typedChar, keyCode)) {
+                || endpoint.textboxKeyTyped(typedChar, keyCode)) {
             return;
         }
         super.keyTyped(typedChar, keyCode);
@@ -281,7 +275,6 @@ final class LegacyConfigScreen extends GuiScreen {
         super.mouseClicked(mouseX, mouseY, mouseButton);
         targetLanguage.mouseClicked(mouseX, mouseY, mouseButton);
         endpoint.mouseClicked(mouseX, mouseY, mouseButton);
-        outgoingTargetLanguage.mouseClicked(mouseX, mouseY, mouseButton);
     }
 
     @Override
@@ -295,11 +288,8 @@ final class LegacyConfigScreen extends GuiScreen {
                 left, layout.targetY - 11, 0xA0A0A0);
         drawString(renderer, tr("screen.universal_translator.endpoint_hint"),
                 left, layout.endpointY - 11, 0xA0A0A0);
-        drawString(renderer, tr("screen.universal_translator.outgoing_target_hint"),
-                layout.right, layout.endpointY - 11, 0xA0A0A0);
         targetLanguage.drawTextBox();
         endpoint.drawTextBox();
-        outgoingTargetLanguage.drawTextBox();
         String rawRuntimeStatus = LegacyTranslationRuntime.status();
         String runtimeStatus = TranslationStatusLocalizer.localize(rawRuntimeStatus,
                 LegacyConfigScreen::tr);
@@ -333,6 +323,10 @@ final class LegacyConfigScreen extends GuiScreen {
         return "tencent-hunyuan".equalsIgnoreCase(provider);
     }
 
+    private boolean isOfficialProvider() {
+        return LegacyConfig.isOfficialProvider(provider);
+    }
+
     private boolean isOffline() {
         return "offline".equalsIgnoreCase(provider);
     }
@@ -342,23 +336,33 @@ final class LegacyConfigScreen extends GuiScreen {
                 || "openai-compatible".equalsIgnoreCase(provider);
     }
 
-    private String providerLabel() {
-        return isOffline() ? tr("value.universal_translator.provider_offline")
-                : (isTencent() ? tr("value.universal_translator.provider_tencent")
-                : (isLlm() ? tr("value.universal_translator.provider_llm") : "Libre"));
+    String providerLabel() {
+        if (isOffline()) {
+            return tr("value.universal_translator.provider_offline");
+        }
+        if (isTencent()) {
+            return tr("value.universal_translator.provider_tencent");
+        }
+        if ("deepseek".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_deepseek");
+        }
+        if ("dashscope".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_dashscope");
+        }
+        if ("zhipu".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_zhipu");
+        }
+        if ("kimi".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_kimi");
+        }
+        return isLlm() ? tr("value.universal_translator.provider_llm") : "Libre";
     }
 
-    private static String nextProvider(String current) {
-        if ("offline".equalsIgnoreCase(current)) {
-            return "libretranslate";
-        }
-        if ("libretranslate".equalsIgnoreCase(current)) {
-            return "tencent-hunyuan";
-        }
-        if ("tencent-hunyuan".equalsIgnoreCase(current)) {
-            return "custom-api";
-        }
-        return "offline";
+    String provider() { return provider; }
+
+    void selectProvider(String provider) {
+        this.provider = provider == null || provider.trim().isEmpty() ? "offline" : provider.trim();
+        refreshLabels();
     }
 
     void applyLlmSettings(String endpoint, String model, String apiKey) {
@@ -367,9 +371,7 @@ final class LegacyConfigScreen extends GuiScreen {
         this.llmApiKey = apiKey;
     }
 
-    String llmApiKey() {
-        return llmApiKey;
-    }
+    String llmApiKey() { return llmApiKey; }
 
     void applyTencentSettings(String secretId, String secretKey, String model) {
         this.tencentSecretId = secretId;
@@ -377,8 +379,72 @@ final class LegacyConfigScreen extends GuiScreen {
         this.tencentModel = model;
     }
 
-    String tencentSecretKey() {
-        return tencentSecretKey;
+    String tencentSecretKey() { return tencentSecretKey; }
+
+    void applyOfficialProviderSettings(String selectedProvider, String model, String apiKey) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            this.dashScopeModel = model;
+            this.dashScopeApiKey = apiKey;
+        } else if ("zhipu".equals(normalized)) {
+            this.zhipuModel = model;
+            this.zhipuApiKey = apiKey;
+        } else if ("kimi".equals(normalized)) {
+            this.kimiModel = model;
+            this.kimiApiKey = apiKey;
+        } else {
+            this.deepSeekModel = model;
+            this.deepSeekApiKey = apiKey;
+        }
+    }
+
+    String officialApiKey(String selectedProvider) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            return dashScopeApiKey;
+        }
+        if ("zhipu".equals(normalized)) {
+            return zhipuApiKey;
+        }
+        if ("kimi".equals(normalized)) {
+            return kimiApiKey;
+        }
+        return deepSeekApiKey;
+    }
+
+    String officialModel(String selectedProvider) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            return dashScopeModel;
+        }
+        if ("zhipu".equals(normalized)) {
+            return zhipuModel;
+        }
+        if ("kimi".equals(normalized)) {
+            return kimiModel;
+        }
+        return deepSeekModel;
+    }
+
+    String defaultOfficialModel(String selectedProvider) {
+        return original.defaultOfficialModel(selectedProvider);
+    }
+
+    private static String normalizeOfficialProvider(String selectedProvider) {
+        if (selectedProvider == null) {
+            return "deepseek";
+        }
+        String normalized = selectedProvider.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("aliyun-dashscope".equals(normalized)) {
+            return "dashscope";
+        }
+        if ("zhipu-ai".equals(normalized)) {
+            return "zhipu";
+        }
+        if ("moonshot".equals(normalized) || "moonshot-kimi".equals(normalized)) {
+            return "kimi";
+        }
+        return normalized;
     }
 
     private LegacyConfig buildConfig() {
@@ -389,7 +455,7 @@ final class LegacyConfigScreen extends GuiScreen {
                 translateOther,
                 translateOutgoing,
                 targetLanguage.getText(),
-                outgoingTargetLanguage.getText(),
+                original.outgoingTargetLanguage,
                 displayMode,
                 translateEnglishOnly,
                 translatedTextColor,
@@ -400,41 +466,40 @@ final class LegacyConfigScreen extends GuiScreen {
                 llmModel,
                 offlineAutoDownload,
                 offlineModel,
-                apiFallback,
-                diskCache).withTencentSettings(tencentSecretId, tencentSecretKey, tencentModel);
+                original.apiFallback,
+                diskCache)
+                .withTencentSettings(tencentSecretId, tencentSecretKey, tencentModel)
+                .withOfficialProviderSettings("deepseek", deepSeekApiKey, deepSeekModel)
+                .withOfficialProviderSettings("dashscope", dashScopeApiKey, dashScopeModel)
+                .withOfficialProviderSettings("zhipu", zhipuApiKey, zhipuModel)
+                .withOfficialProviderSettings("kimi", kimiApiKey, kimiModel);
     }
 
     void clearTencentSettings() {
         this.tencentSecretId = "";
         this.tencentSecretKey = "";
         this.tencentModel = "";
-        LegacyConfig cleared = buildConfig();
-        try {
-            cleared.save();
-        } catch (Exception ignored) {
-            // 配置已清空，保存失败时忽略
-        }
-        try {
-            LegacyTranslationRuntime.initialize(cleared);
-        } catch (Exception ignored) {
-            // 运行时将在下次保存时刷新
-        }
+        saveClearedConfig();
     }
 
     void clearLlmSettings() {
         this.llmEndpoint = "";
         this.llmApiKey = "";
         this.llmModel = "";
+        saveClearedConfig();
+    }
+
+    private void saveClearedConfig() {
         LegacyConfig cleared = buildConfig();
         try {
             cleared.save();
         } catch (Exception ignored) {
-            // 配置已清空，保存失败时忽略
+            // 清空后忽略保存错误
         }
         try {
             LegacyTranslationRuntime.initialize(cleared);
         } catch (Exception ignored) {
-            // 运行时将在下次保存时刷新
+            // 下次保存刷新
         }
     }
 
@@ -451,8 +516,10 @@ final class LegacyConfigScreen extends GuiScreen {
         }
     }
 
-    private static String tr(String key, Object... arguments) {
-        return I18n.format(key, arguments);
+    private static String tr(String key, Object... arguments) { return I18n.format(key, arguments); }
+
+    private static String defaultTargetLanguage(String value) {
+        return value == null || value.trim().isEmpty() || "-".equals(value.trim()) ? "zh-CN" : value;
     }
 
     private Layout layout() {
@@ -470,27 +537,15 @@ final class LegacyConfigScreen extends GuiScreen {
     }
 
     private static final class Layout {
-        private final int left;
-        private final int right;
-        private final int totalWidth;
-        private final int buttonWidth;
-        private final int top;
-        private final int rowStep;
-        private final int targetY;
-        private final int endpointY;
-        private final int saveY;
+        private final int left, right, totalWidth, buttonWidth;
+        private final int top, rowStep, targetY, endpointY, saveY;
 
         private Layout(int left, int right, int totalWidth, int buttonWidth,
                        int top, int rowStep, int targetY, int endpointY, int saveY) {
-            this.left = left;
-            this.right = right;
-            this.totalWidth = totalWidth;
-            this.buttonWidth = buttonWidth;
-            this.top = top;
-            this.rowStep = rowStep;
-            this.targetY = targetY;
-            this.endpointY = endpointY;
-            this.saveY = saveY;
+            this.left = left; this.right = right;
+            this.totalWidth = totalWidth; this.buttonWidth = buttonWidth;
+            this.top = top; this.rowStep = rowStep;
+            this.targetY = targetY; this.endpointY = endpointY; this.saveY = saveY;
         }
 
         private int row(int index) {

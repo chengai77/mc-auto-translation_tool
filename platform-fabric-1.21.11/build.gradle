@@ -33,6 +33,33 @@ loom {
     }
 }
 
+sourceSets {
+    test {
+        compileClasspath += sourceSets.client.output + sourceSets.client.compileClasspath
+        runtimeClasspath += sourceSets.client.output + sourceSets.client.runtimeClasspath
+    }
+}
+
+tasks.named("compileTestJava") {
+    dependsOn(tasks.named("clientClasses"))
+}
+
+tasks.register("styledChatSelfTest", JavaExec) {
+    group = "verification"
+    description = "Checks chat style and interaction attachment preservation."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "org.universaltranslator.fabric.StyledChatTextSelfTest"
+}
+
+tasks.named("test") {
+    failOnNoDiscoveredTests = false
+}
+
+tasks.named("check") {
+    dependsOn(tasks.named("styledChatSelfTest"))
+}
+
 processResources {
     inputs.property "version", project.version
     filesMatching("fabric.mod.json") {

@@ -5,7 +5,7 @@ import org.universaltranslator.core.TextKind;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
-/** Thread-local surface classification used while nested HUD render methods run. */
+/** 线程局部界面类 */
 public final class TranslationRenderContext {
     private static final ThreadLocal<Deque<TextKind>> KINDS =
             new ThreadLocal<Deque<TextKind>>() {
@@ -46,7 +46,7 @@ public final class TranslationRenderContext {
         return kinds.isEmpty() ? fallback : kinds.peek();
     }
 
-    /** Prevents locally typed text from entering the global render translation path. */
+    /** 屏蔽本地输入 */
     public static void pushTextInput() {
         Integer depth = TEXT_INPUT_DEPTH.get();
         TEXT_INPUT_DEPTH.set(depth == null ? 1 : depth + 1);

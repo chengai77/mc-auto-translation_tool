@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Public bytecode injection target. Keep this signature stable across legacy versions. */
+/** 注入目标稳定 */
 public final class LegacyRenderedTextBridge {
     private static final AtomicBoolean ITEM_TOOLTIP_REACHED = new AtomicBoolean();
     private static final AtomicBoolean ITEM_TOOLTIP_APPLIED = new AtomicBoolean();
@@ -41,12 +41,12 @@ public final class LegacyRenderedTextBridge {
                 text, translated, LegacyTranslationRuntime.translatedTextColor());
     }
 
-    /** High-level tooltip hook used by both 1.8.9 and 1.12.2. */
+    /** 高级提示钩子 */
     public static List<String> translateTooltipLines(List<String> lines) {
         return translateTooltipLines(lines, false);
     }
 
-    /** Canonical ItemStack tooltip producer hook used by inventory and container screens. */
+    /** 物品提示钩子 */
     public static List<String> translateItemTooltipLines(List<String> lines) {
         if (ITEM_TOOLTIP_REACHED.compareAndSet(false, true)) {
             System.out.println("[MC Auto Translation Tool] Item tooltip producer reached");

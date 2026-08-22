@@ -1,5 +1,7 @@
 package org.universaltranslator.fabric;
 
+import org.universaltranslator.core.InlineTextureCode;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -15,15 +17,20 @@ final class TranslationLog {
         if (original == null || translated == null) {
             return;
         }
-        String cleanOriginal = original.trim();
-        String cleanTranslated = translated.trim();
+        String cleanOriginal = InlineTextureCode.strip(original).trim();
+        String cleanTranslated = InlineTextureCode.strip(translated).trim();
         if (cleanOriginal.isEmpty() || cleanTranslated.isEmpty()
                 || cleanOriginal.equals(cleanTranslated)) {
             return;
         }
-        for (Entry entry : ENTRIES) {
+        for (int index = 0; index < ENTRIES.size(); index++) {
+            Entry entry = ENTRIES.get(index);
             if (entry.original.equals(cleanOriginal)) {
-                return;
+                if (entry.translated.equals(cleanTranslated)) {
+                    return;
+                }
+                ENTRIES.remove(index);
+                break;
             }
         }
         ENTRIES.add(0, new Entry(cleanOriginal, cleanTranslated, System.currentTimeMillis()));

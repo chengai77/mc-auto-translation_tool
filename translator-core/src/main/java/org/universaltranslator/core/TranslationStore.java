@@ -1,6 +1,6 @@
 package org.universaltranslator.core;
 
-/** Cache abstraction shared by memory-only and privacy-conscious disk stores. */
+/** 缓存抽象层 */
 public interface TranslationStore {
     String get(String key);
 

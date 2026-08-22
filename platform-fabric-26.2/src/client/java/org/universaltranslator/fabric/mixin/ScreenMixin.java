@@ -12,7 +12,7 @@ import org.universaltranslator.fabric.RenderedTextBridge;
 
 import java.util.List;
 
-/** Translates the canonical item tooltip list before inventory screens render it. */
+/** 物品提示前翻译 */
 @Mixin(Screen.class)
 abstract class ScreenMixin {
     @Inject(

@@ -8,7 +8,11 @@ import org.universaltranslator.core.LocalConfigSecurity;
 import org.universaltranslator.core.OfflineModel;
 import org.universaltranslator.core.provider.LibreTranslateProvider;
 import org.universaltranslator.core.provider.TencentHunyuanProvider;
+import org.universaltranslator.core.provider.DashScopeOfficialProvider;
+import org.universaltranslator.core.provider.DeepSeekOfficialProvider;
 import org.universaltranslator.core.provider.FallbackTranslationProvider;
+import org.universaltranslator.core.provider.KimiOfficialProvider;
+import org.universaltranslator.core.provider.ZhipuOfficialProvider;
 import org.universaltranslator.core.provider.LlamaCppOfflineProvider;
 import org.universaltranslator.core.provider.OpenAiChatTranslationProvider;
 
@@ -45,6 +49,14 @@ final class LegacyConfig {
     final String llmEndpoint;
     final String llmApiKey;
     final String llmModel;
+    final String deepSeekApiKey;
+    final String deepSeekModel;
+    final String dashScopeApiKey;
+    final String dashScopeModel;
+    final String zhipuApiKey;
+    final String zhipuModel;
+    final String kimiApiKey;
+    final String kimiModel;
     final boolean offlineAutoDownload;
     final OfflineModel offlineModel;
     final boolean apiFallback;
@@ -80,6 +92,18 @@ final class LegacyConfig {
         llmEndpoint = properties.getProperty("llm-api-endpoint", "").trim();
         llmApiKey = properties.getProperty("llm-api-key", "").trim();
         llmModel = properties.getProperty("llm-api-model", "").trim();
+        deepSeekApiKey = properties.getProperty("deepseek-api-key", "").trim();
+        deepSeekModel = properties.getProperty(
+                "deepseek-model", DeepSeekOfficialProvider.DEFAULT_MODEL).trim();
+        dashScopeApiKey = properties.getProperty("dashscope-api-key", "").trim();
+        dashScopeModel = properties.getProperty(
+                "dashscope-model", DashScopeOfficialProvider.DEFAULT_MODEL).trim();
+        zhipuApiKey = properties.getProperty("zhipu-api-key", "").trim();
+        zhipuModel = properties.getProperty(
+                "zhipu-model", ZhipuOfficialProvider.DEFAULT_MODEL).trim();
+        kimiApiKey = properties.getProperty("kimi-api-key", "").trim();
+        kimiModel = properties.getProperty(
+                "kimi-model", KimiOfficialProvider.DEFAULT_MODEL).trim();
         offlineAutoDownload = Boolean.parseBoolean(
                 properties.getProperty("offline-auto-download", "true"));
         offlineModel = OfflineModel.fromConfig(properties.getProperty("offline-model", "lite"));
@@ -180,6 +204,14 @@ final class LegacyConfig {
         return new LegacyConfig(properties, configFile, cacheFile);
     }
 
+    LegacyConfig withOfficialProviderSettings(String selectedProvider, String apiKey, String model) {
+        Properties properties = toProperties();
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        properties.setProperty(normalized + "-api-key", apiKey == null ? "" : apiKey.trim());
+        properties.setProperty(normalized + "-model", normalizeOfficialModel(normalized, model));
+        return new LegacyConfig(properties, configFile, cacheFile);
+    }
+
     LegacyConfig withEnabled(boolean enabled) {
         Properties properties = toProperties();
         properties.setProperty("enabled", Boolean.toString(enabled));
@@ -210,7 +242,7 @@ final class LegacyConfig {
             try {
                 Files.deleteIfExists(temporary);
             } catch (IOException ignored) {
-                // Preserve the original save failure, if any.
+                // 保留原错误
             }
         }
         LocalConfigSecurity.restrictToOwner(file);
@@ -250,11 +282,100 @@ final class LegacyConfig {
         if ("tencent-hunyuan".equalsIgnoreCase(selectedProvider)) {
             return new TencentHunyuanProvider(tencentSecretId, tencentSecretKey, tencentModel);
         }
+        String officialProvider = normalizeOfficialProvider(selectedProvider);
+        if ("deepseek".equals(officialProvider)) {
+            return new DeepSeekOfficialProvider(deepSeekApiKey, deepSeekModel);
+        }
+        if ("dashscope".equals(officialProvider)) {
+            return new DashScopeOfficialProvider(dashScopeApiKey, dashScopeModel);
+        }
+        if ("zhipu".equals(officialProvider)) {
+            return new ZhipuOfficialProvider(zhipuApiKey, zhipuModel);
+        }
+        if ("kimi".equals(officialProvider)) {
+            return new KimiOfficialProvider(kimiApiKey, kimiModel);
+        }
         if (isCustomApiProvider(selectedProvider)) {
             return new OpenAiChatTranslationProvider(
                     llmEndpoint, llmApiKey, llmModel, "custom-api");
         }
         throw new IllegalArgumentException("Unsupported translation provider: " + selectedProvider);
+    }
+
+    static boolean isOfficialProvider(String selectedProvider) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        return "deepseek".equals(normalized)
+                || "dashscope".equals(normalized)
+                || "zhipu".equals(normalized)
+                || "kimi".equals(normalized);
+    }
+
+    String officialApiKey(String selectedProvider) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            return dashScopeApiKey;
+        }
+        if ("zhipu".equals(normalized)) {
+            return zhipuApiKey;
+        }
+        if ("kimi".equals(normalized)) {
+            return kimiApiKey;
+        }
+        return deepSeekApiKey;
+    }
+
+    String officialModel(String selectedProvider) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            return dashScopeModel;
+        }
+        if ("zhipu".equals(normalized)) {
+            return zhipuModel;
+        }
+        if ("kimi".equals(normalized)) {
+            return kimiModel;
+        }
+        return deepSeekModel;
+    }
+
+    String defaultOfficialModel(String selectedProvider) {
+        return defaultOfficialModelFor(normalizeOfficialProvider(selectedProvider));
+    }
+
+    private static String normalizeOfficialProvider(String selectedProvider) {
+        if (selectedProvider == null) {
+            return "deepseek";
+        }
+        String normalized = selectedProvider.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("aliyun-dashscope".equals(normalized)) {
+            return "dashscope";
+        }
+        if ("zhipu-ai".equals(normalized)) {
+            return "zhipu";
+        }
+        if ("moonshot".equals(normalized) || "moonshot-kimi".equals(normalized)) {
+            return "kimi";
+        }
+        return normalized;
+    }
+
+    private static String normalizeOfficialModel(String selectedProvider, String model) {
+        return model == null || model.trim().isEmpty()
+                ? defaultOfficialModelFor(selectedProvider)
+                : model.trim();
+    }
+
+    private static String defaultOfficialModelFor(String selectedProvider) {
+        if ("dashscope".equals(selectedProvider)) {
+            return DashScopeOfficialProvider.DEFAULT_MODEL;
+        }
+        if ("zhipu".equals(selectedProvider)) {
+            return ZhipuOfficialProvider.DEFAULT_MODEL;
+        }
+        if ("kimi".equals(selectedProvider)) {
+            return KimiOfficialProvider.DEFAULT_MODEL;
+        }
+        return DeepSeekOfficialProvider.DEFAULT_MODEL;
     }
 
     private static boolean isCustomApiProvider(String selectedProvider) {
@@ -283,6 +404,14 @@ final class LegacyConfig {
         properties.setProperty("llm-api-endpoint", "");
         properties.setProperty("llm-api-key", "");
         properties.setProperty("llm-api-model", "");
+        properties.setProperty("deepseek-api-key", "");
+        properties.setProperty("deepseek-model", DeepSeekOfficialProvider.DEFAULT_MODEL);
+        properties.setProperty("dashscope-api-key", "");
+        properties.setProperty("dashscope-model", DashScopeOfficialProvider.DEFAULT_MODEL);
+        properties.setProperty("zhipu-api-key", "");
+        properties.setProperty("zhipu-model", ZhipuOfficialProvider.DEFAULT_MODEL);
+        properties.setProperty("kimi-api-key", "");
+        properties.setProperty("kimi-model", KimiOfficialProvider.DEFAULT_MODEL);
         properties.setProperty("offline-auto-download", "true");
         properties.setProperty("offline-model", "lite");
         properties.setProperty("api-fallback", "false");
@@ -313,6 +442,14 @@ final class LegacyConfig {
         properties.setProperty("llm-api-endpoint", llmEndpoint);
         properties.setProperty("llm-api-key", llmApiKey);
         properties.setProperty("llm-api-model", llmModel);
+        properties.setProperty("deepseek-api-key", deepSeekApiKey);
+        properties.setProperty("deepseek-model", deepSeekModel);
+        properties.setProperty("dashscope-api-key", dashScopeApiKey);
+        properties.setProperty("dashscope-model", dashScopeModel);
+        properties.setProperty("zhipu-api-key", zhipuApiKey);
+        properties.setProperty("zhipu-model", zhipuModel);
+        properties.setProperty("kimi-api-key", kimiApiKey);
+        properties.setProperty("kimi-model", kimiModel);
         properties.setProperty("offline-auto-download", Boolean.toString(offlineAutoDownload));
         properties.setProperty("offline-model", offlineModel.configName());
         properties.setProperty("api-fallback", Boolean.toString(apiFallback));

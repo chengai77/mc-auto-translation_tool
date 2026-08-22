@@ -5,9 +5,9 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
-/** Minecraft domain glossary and prompt hints. */
+/** MC术语与提示词 */
 public final class GameTranslationHints {
-    public static final String VERSION = "game-hints-v1";
+    public static final String VERSION = "game-hints-v8";
 
     private static final Map<String, String> ZH_CN_EXACT = exactZhCn();
     private static final Map<String, String> ZH_TW_EXACT = exactZhTw();
@@ -28,6 +28,8 @@ public final class GameTranslationHints {
                     + "lobby=\u5927\u5385, server=\u670d\u52a1\u5668, craft=\u5408\u6210, recipe=\u914d\u65b9, "
                     + "durability=\u8010\u4e45, enchantment=\u9644\u9b54, potion=\u836f\u6c34, "
                     + "buff=\u52a0\u5f3a, nerf=\u524a\u5f31, grind=\u5237, farm=\u5237/\u519c\u573a, "
+                    + "melee=\u8fd1\u6218, cooldown=\u51b7\u5374, hit reach=\u653b\u51fb\u8ddd\u79bb, crosshair=\u51c6\u661f, "
+                    + "CTM map=CTM\u5730\u56fe, map=\u5730\u56fe, objective=\u76ee\u6807, checkpoint=\u68c0\u67e5\u70b9, "
                     + "drop=\u6389\u843d, gg=\u6253\u5f97\u597d, ez=\u7b80\u5355, afk=\u6682\u79bb, "
                     + "brb=\u9a6c\u4e0a\u56de\u6765, lol=\u54c8\u54c8, noob=\u83dc\u9e1f/\u840c\u65b0.";
 
@@ -46,13 +48,27 @@ public final class GameTranslationHints {
         if (parts.normalized.isEmpty()) {
             return null;
         }
-        String translated = null;
-        if (TargetLanguage.isSimplifiedChinese(targetLanguage)) {
-            translated = ZH_CN_EXACT.get(parts.normalized);
-        } else if (TargetLanguage.isTraditionalChinese(targetLanguage)) {
-            translated = ZH_TW_EXACT.get(parts.normalized);
-        }
+        Map<String, String> terms = exactTerms(targetLanguage);
+        String translated = terms == null ? null : terms.get(parts.normalized);
         return translated == null ? null : parts.prefix + translated + parts.suffix;
+    }
+
+    /** 本地短标签翻译 */
+    public static String localTranslation(String source, String targetLanguage) {
+        TermParts parts = splitTerm(source);
+        if (parts.normalized.isEmpty()) {
+            return null;
+        }
+        Map<String, String> terms = exactTerms(targetLanguage);
+        if (terms == null) {
+            return null;
+        }
+        String exact = terms.get(parts.normalized);
+        if (exact != null) {
+            return parts.prefix + exact + parts.suffix;
+        }
+        String composed = composeShortLabel(parts.core, terms, targetLanguage);
+        return composed == null ? null : parts.prefix + composed + parts.suffix;
     }
 
     public static String glossaryFor(String targetLanguage) {
@@ -66,35 +82,46 @@ public final class GameTranslationHints {
                 + "and in-game item/block/entity names over software/project meanings.";
     }
 
-    public static String openAiInstruction(TranslationRequest request) {
+    public static String openAiInstruction() {
         StringBuilder output = new StringBuilder(768);
         output.append(" Domain: Minecraft and multiplayer game UI/chat. ")
                 .append("Resolve ambiguous words as in-game terms first; for example bullet means ammunition, not a project item. ")
+                .append("Translate complete phrases by meaning with natural target-language word order, never word by word. ")
+                .append("For announcements, first infer the relationships between names, dates, durations and clauses, then write one fluent and coherent translation. ")
+                .append("Keep hyphenated event names intact, and distinguish dates from durations before choosing target-language word order. ")
+                .append("For Chinese, place time and condition clauses before the predicate they modify while keeping the sentence topic in front. ")
+                .append("Rebuild the sentence from its meaning instead of copying English clause order. ")
+                .append("Every protected token must appear exactly once and must not cross a line or enclosing marker boundary. ")
+                .append("Some token pairs surround colored or clickable text; keep the translated phrase between its matching surrounding tokens. ")
+                .append("Use numeric_reference only to distinguish counts, measurements, indexes, and percentages. ")
+                .append("For Chinese count nouns, add a natural classifier even when the numeral is a protected token. ")
+                .append("Express completion percentages with natural completion/progress predicate-object order, never as destinations or objects. ")
+                .append("Treat visual wrapping as layout, preserve proper names and established abbreviations such as CTM, ")
+                .append("and keep each protected token exactly once at its original semantic position. ")
                 .append("Use common Minecraft names and server slang naturally.");
-        appendIfPresent(output, " Preset glossary: ", request.getGlossaryHint());
-        appendIfPresent(output, " Recent context from cached translations: ", request.getContextHint());
         return output.toString();
     }
 
     public static String tencentField(TranslationRequest request) {
         String glossary = request.getGlossaryHint();
-        String field = "Minecraft game UI and multiplayer server chat";
-        if (glossary == null || glossary.isEmpty()) {
-            return field;
+        StringBuilder field = new StringBuilder(
+                "Minecraft game UI and multiplayer server chat");
+        if (glossary != null && !glossary.isEmpty()) {
+            int limit = Math.min(glossary.length(), 220);
+            field.append("; ").append(glossary, 0, limit);
         }
-        int limit = Math.min(glossary.length(), 220);
-        return field + "; " + glossary.substring(0, limit);
-    }
-
-    private static void appendIfPresent(StringBuilder output, String label, String value) {
-        if (value != null && !value.trim().isEmpty()) {
-            output.append(label).append(value.trim());
+        String numericHint = request.getNumericHint();
+        if (numericHint != null && !numericHint.isEmpty()) {
+            String compact = numericHint.replace('\n', ' ').replace('\r', ' ');
+            int limit = Math.min(compact.length(), 280);
+            field.append("; ").append(compact, 0, limit);
         }
+        return field.toString();
     }
 
     private static TermParts splitTerm(String source) {
         if (source == null) {
-            return new TermParts("", "", "");
+            return new TermParts("", "", "", "");
         }
         String stripped = TranslationTextStyling.stripLegacyFormatting(source)
                 .trim()
@@ -112,7 +139,110 @@ public final class GameTranslationHints {
                 .trim()
                 .toLowerCase(Locale.ROOT)
                 .replaceAll("\\s+", " ");
-        return new TermParts(stripped.substring(0, start), normalized, stripped.substring(end));
+        return new TermParts(
+                stripped.substring(0, start), stripped.substring(start, end),
+                normalized, stripped.substring(end));
+    }
+
+    private static Map<String, String> exactTerms(String targetLanguage) {
+        if (TargetLanguage.isSimplifiedChinese(targetLanguage)) {
+            return ZH_CN_EXACT;
+        }
+        if (TargetLanguage.isTraditionalChinese(targetLanguage)) {
+            return ZH_TW_EXACT;
+        }
+        return null;
+    }
+
+    private static String composeShortLabel(
+            String core, Map<String, String> terms, String targetLanguage) {
+        String[] words = core.trim().split("\\s+");
+        if (words.length < 2 || words.length > 6) {
+            return null;
+        }
+        String finalWord = words[words.length - 1].toLowerCase(Locale.ROOT);
+        int bodyEnd = words.length;
+        String prefixState = null;
+        String suffixState = null;
+        if ("retrieved".equals(finalWord)) {
+            bodyEnd--;
+            prefixState = terms.get("retrieved");
+        } else if ("on".equals(finalWord)) {
+            bodyEnd--;
+            suffixState = TargetLanguage.isTraditionalChinese(targetLanguage)
+                    ? "\u5df2\u958b\u555f" : "\u5df2\u5f00\u542f";
+        } else if ("off".equals(finalWord)) {
+            bodyEnd--;
+            suffixState = TargetLanguage.isTraditionalChinese(targetLanguage)
+                    ? "\u5df2\u95dc\u9589" : "\u5df2\u5173\u95ed";
+        }
+        String body = translateKnownWords(
+                words, bodyEnd, terms, prefixState != null || suffixState != null);
+        if (body == null || body.isEmpty()) {
+            return null;
+        }
+        if (prefixState != null) {
+            return prefixState + (startsWithLatin(body) ? " " : "") + body;
+        }
+        return suffixState == null ? body : body + suffixState;
+    }
+
+    private static String translateKnownWords(
+            String[] words, int end, Map<String, String> terms,
+            boolean allowIdentifierOnly) {
+        if (end <= 0) {
+            return null;
+        }
+        StringBuilder output = new StringBuilder();
+        boolean previousIdentifier = false;
+        boolean translatedKnownWord = false;
+        for (int index = 0; index < end; index++) {
+            String word = words[index];
+            String translated = terms.get(word.toLowerCase(Locale.ROOT));
+            boolean identifier = false;
+            if (translated == null) {
+                if (!isIdentifier(word)) {
+                    return null;
+                }
+                translated = word;
+                identifier = true;
+            } else {
+                translatedKnownWord = true;
+            }
+            if (output.length() > 0 && previousIdentifier && identifier) {
+                output.append(' ');
+            }
+            output.append(translated);
+            previousIdentifier = identifier;
+        }
+        return translatedKnownWord || allowIdentifierOnly ? output.toString() : null;
+    }
+
+    private static boolean isIdentifier(String word) {
+        if (word == null || word.length() < 2 || word.length() > 24) {
+            return false;
+        }
+        boolean hasLetter = false;
+        boolean hasDistinctiveCharacter = false;
+        for (int index = 0; index < word.length(); index++) {
+            char value = word.charAt(index);
+            if (Character.isLetter(value)) {
+                hasLetter = true;
+                if (index > 0 && Character.isUpperCase(value)) {
+                    hasDistinctiveCharacter = true;
+                }
+            } else if (Character.isDigit(value) || value == '_' || value == '-') {
+                hasDistinctiveCharacter = true;
+            } else {
+                return false;
+            }
+        }
+        return hasLetter && hasDistinctiveCharacter;
+    }
+
+    private static boolean startsWithLatin(String value) {
+        char first = value.charAt(0);
+        return (first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z');
     }
 
     private static boolean isWrapper(char value) {
@@ -149,6 +279,19 @@ public final class GameTranslationHints {
         put(terms, "end", "\u672b\u5730");
         put(terms, "overworld", "\u4e3b\u4e16\u754c");
         put(terms, "redstone", "\u7ea2\u77f3");
+        put(terms, "and", "\u800c\u4e14");
+        put(terms, "or", "\u6216\u8005");
+        put(terms, "oh", "\u54e6");
+        put(terms, "warning", "\u8b66\u544a");
+        put(terms, "on", "\u5f00\u542f");
+        put(terms, "off", "\u5173\u95ed");
+        put(terms, "yes", "\u662f");
+        put(terms, "no", "\u5426");
+        put(terms, "cabin", "\u5c0f\u5c4b");
+        put(terms, "radio", "\u65e0\u7ebf\u7535");
+        put(terms, "antenna", "\u5929\u7ebf");
+        put(terms, "facility", "\u8bbe\u65bd");
+        put(terms, "retrieved", "\u5df2\u83b7\u53d6");
         return Collections.unmodifiableMap(terms);
     }
 
@@ -171,6 +314,19 @@ public final class GameTranslationHints {
         put(terms, "entity", "\u5be6\u9ad4");
         put(terms, "nether", "\u4e0b\u754c");
         put(terms, "end", "\u7d42\u754c");
+        put(terms, "and", "\u4e26\u4e14");
+        put(terms, "or", "\u6216\u8005");
+        put(terms, "oh", "\u54e6");
+        put(terms, "warning", "\u8b66\u544a");
+        put(terms, "on", "\u958b\u555f");
+        put(terms, "off", "\u95dc\u9589");
+        put(terms, "yes", "\u662f");
+        put(terms, "no", "\u5426");
+        put(terms, "cabin", "\u5c0f\u5c4b");
+        put(terms, "radio", "\u7121\u7dda\u96fb");
+        put(terms, "antenna", "\u5929\u7dda");
+        put(terms, "facility", "\u8a2d\u65bd");
+        put(terms, "retrieved", "\u5df2\u53d6\u5f97");
         return Collections.unmodifiableMap(terms);
     }
 
@@ -180,11 +336,13 @@ public final class GameTranslationHints {
 
     private static final class TermParts {
         private final String prefix;
+        private final String core;
         private final String normalized;
         private final String suffix;
 
-        private TermParts(String prefix, String normalized, String suffix) {
+        private TermParts(String prefix, String core, String normalized, String suffix) {
             this.prefix = prefix;
+            this.core = core;
             this.normalized = normalized;
             this.suffix = suffix;
         }

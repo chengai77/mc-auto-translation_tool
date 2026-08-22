@@ -5,7 +5,7 @@ import org.universaltranslator.core.TextKind;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
-/** Thread-local render category set by legacy ASM hooks. */
+/** 旧版渲染类别 */
 public final class LegacyRenderContext {
     private static final ThreadLocal<Deque<TextKind>> KINDS =
             new ThreadLocal<Deque<TextKind>>() {
@@ -28,7 +28,7 @@ public final class LegacyRenderContext {
         KINDS.get().push(TextKind.TOOLTIP);
     }
 
-    /** Prevents the global FontRenderer hook from translating locally typed text. */
+    /** 屏蔽本地输入 */
     public static void pushTextInput() {
         Integer depth = TEXT_INPUT_DEPTH.get();
         TEXT_INPUT_DEPTH.set(depth == null ? 1 : depth + 1);

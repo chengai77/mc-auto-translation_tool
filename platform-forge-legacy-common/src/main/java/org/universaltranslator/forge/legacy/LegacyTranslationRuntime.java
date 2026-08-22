@@ -7,6 +7,7 @@ import org.universaltranslator.core.RenderTranslationSession;
 import org.universaltranslator.core.PersistentTranslationCache;
 import org.universaltranslator.core.TextKind;
 import org.universaltranslator.core.TranslationCache;
+import org.universaltranslator.core.TranslationCacheOperations;
 import org.universaltranslator.core.TranslationStore;
 import org.universaltranslator.core.TranslationProvider;
 import org.universaltranslator.core.TranslationProviderStatus;
@@ -25,11 +26,14 @@ import java.util.concurrent.CompletableFuture;
 
 final class LegacyTranslationRuntime {
     private static final long PLAYER_NAME_SNAPSHOT_MILLIS = 5_000L;
-    // Match ProtectedText's bounded literal limit so large network lobbies do not silently
-    // drop names after the first few tab-list pages.
+    // 对齐保护上限
+    // 避免截断名单
     private static final int MAX_PROTECTED_PLAYER_NAMES = 1_000;
 
     private static volatile RenderTranslationSession session;
+    private static volatile TranslationStore cacheStore;
+    private static volatile boolean cacheStoreDisk;
+    private static volatile Path cacheStoreFile;
     private static volatile LegacyConfig activeConfig;
     private static volatile TranslationProvider activeProvider;
     private static volatile List<String> protectedPlayerNames = Collections.emptyList();
@@ -44,9 +48,7 @@ final class LegacyTranslationRuntime {
         shutdown();
         activeConfig = config;
         if (config.enabled) {
-            TranslationStore store = config.diskCache
-                    ? new PersistentTranslationCache(config.cacheFile.toPath(), 10_000)
-                    : new TranslationCache(10_000);
+            TranslationStore store = prepareCacheStore(config);
             TranslationProvider provider = config.createProvider();
             activeProvider = provider;
             int workers = provider.id().contains("offline-llama:") ? 1 : 2;
@@ -70,12 +72,56 @@ final class LegacyTranslationRuntime {
         if (active == null || config == null || !config.allows(kind)
                 || minecraft.currentScreen instanceof LegacyConfigScreen
                 || minecraft.currentScreen instanceof LegacyDiagnosticsScreen
+                || minecraft.currentScreen instanceof LegacyCacheScreen
                 || LegacyLocalTextGuard.isLocalChatInput(minecraft.currentScreen, original)
                 || RECENT_USER_TEXT.shouldPreserve(original)
                 || LegacyVersionAccess.connection(minecraft) == null) {
             return original;
         }
         return active.lookup(original, kind);
+    }
+
+    static synchronized int importCache(Path source) throws IOException {
+        RenderTranslationSession active = session;
+        return active == null
+                ? TranslationCacheOperations.importInto(requireCacheStore(), source)
+                : active.importCache(source);
+    }
+
+    static synchronized Path exportCache(Path target) throws IOException {
+        RenderTranslationSession active = session;
+        return active == null
+                ? TranslationCacheOperations.exportFrom(requireCacheStore(), target)
+                : active.exportCache(target);
+    }
+
+    static synchronized void clearCacheFile() throws IOException {
+        RenderTranslationSession active = session;
+        if (active == null) {
+            TranslationCacheOperations.clear(requireCacheStore());
+        } else {
+            active.clearCacheFile();
+        }
+    }
+
+    private static TranslationStore requireCacheStore() throws IOException {
+        LegacyConfig config = activeConfig;
+        if (config == null) {
+            throw new IOException("Translation settings are not initialized");
+        }
+        return prepareCacheStore(config);
+    }
+
+    private static TranslationStore prepareCacheStore(LegacyConfig config) throws IOException {
+        Path file = config.cacheFile.toPath().toAbsolutePath().normalize();
+        if (cacheStore == null || cacheStoreDisk != config.diskCache || !file.equals(cacheStoreFile)) {
+            cacheStore = config.diskCache
+                    ? new PersistentTranslationCache(file, 10_000)
+                    : new TranslationCache(10_000);
+            cacheStoreDisk = config.diskCache;
+            cacheStoreFile = file;
+        }
+        return cacheStore;
     }
 
     static synchronized void shutdown() {
@@ -134,8 +180,8 @@ final class LegacyTranslationRuntime {
         TranslationProvider provider = activeProvider;
         String providerStatus = provider instanceof TranslationProviderStatus
                 ? ((TranslationProviderStatus) provider).status() : "";
-        // Preserve the offline provider's concrete process error instead of alternating it with
-        // the session's generic "translation failed" wrapper on successive client ticks.
+        // 保留离线错误
+        // 避免错误跳变
         if (providerStatus.startsWith("离线翻译失败")) {
             return providerStatus;
         }
@@ -181,6 +227,7 @@ final class LegacyTranslationRuntime {
         if (active == null || config == null || !config.allows(kind)
                 || minecraft.currentScreen instanceof LegacyConfigScreen
                 || minecraft.currentScreen instanceof LegacyDiagnosticsScreen
+                || minecraft.currentScreen instanceof LegacyCacheScreen
                 || LegacyRenderContext.isTextInput()
                 || LegacyVersionAccess.connection(minecraft) == null) {
             return originals;
@@ -195,6 +242,7 @@ final class LegacyTranslationRuntime {
         if (active == null || config == null || !config.allows(kind)
                 || minecraft.currentScreen instanceof LegacyConfigScreen
                 || minecraft.currentScreen instanceof LegacyDiagnosticsScreen
+                || minecraft.currentScreen instanceof LegacyCacheScreen
                 || LegacyRenderContext.isTextInput()
                 || LegacyVersionAccess.connection(minecraft) == null) {
             return originals;
@@ -217,7 +265,7 @@ final class LegacyTranslationRuntime {
                 && message != null && !message.trim().isEmpty() && !message.startsWith("/");
     }
 
-    /** Serializes outgoing requests so rapidly sent chat lines keep their original order. */
+    /** 发送顺序序列化 */
     static synchronized CompletableFuture<TranslationResult> translateOutgoing(String message) {
         final RenderTranslationSession active = session;
         final LegacyConfig config = activeConfig;
@@ -225,8 +273,8 @@ final class LegacyTranslationRuntime {
             return CompletableFuture.completedFuture(TranslationResult.unchanged(message));
         }
         RECENT_USER_TEXT.remember(message);
-        // Capture the tab-list/server literals on Minecraft's calling thread. The translation
-        // itself may finish on a worker, but must not inspect client network state there.
+        // 主线程取字面
+        // 工作线程不查网络
         CompletableFuture<TranslationResult> translated = active.translateInteractive(
                 message, TextKind.CHAT, config.outgoingTargetLanguage, false);
         CompletableFuture<TranslationResult> next = outgoingTail

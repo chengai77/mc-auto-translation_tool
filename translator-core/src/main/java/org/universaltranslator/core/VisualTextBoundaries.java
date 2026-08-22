@@ -3,7 +3,7 @@ package org.universaltranslator.core;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Visual-only text boundary rules. */
+/** 视觉边界规则 */
 public final class VisualTextBoundaries {
     private static final int MIN_SEPARATOR_RUN = 3;
 
@@ -36,7 +36,7 @@ public final class VisualTextBoundaries {
             if (Character.isWhitespace(value)) {
                 continue;
             }
-            if (!isSeparator(value)) {
+            if (!isSeparatorChar(value)) {
                 return false;
             }
             count++;
@@ -57,7 +57,56 @@ public final class VisualTextBoundaries {
         return lines;
     }
 
-    private static boolean isSeparator(char value) {
+    public static List<String> splitBracketSegments(String text) {
+        List<String> segments = new ArrayList<String>();
+        if (text == null || text.trim().isEmpty()) {
+            return segments;
+        }
+        int cursor = 0;
+        int index = 0;
+        while (index < text.length()) {
+            char close = matchingClose(text.charAt(index));
+            if (close == 0) {
+                index++;
+                continue;
+            }
+            int end = text.indexOf(close, index + 1);
+            if (end < 0) {
+                end = text.length() - 1;
+            }
+            if (InlineTextureCode.isExact(text.substring(index, end + 1))) {
+                index = end + 1;
+                continue;
+            }
+            addSegment(segments, text.substring(cursor, index));
+            addSegment(segments, text.substring(index, end + 1));
+            cursor = end + 1;
+            index = cursor;
+        }
+        addSegment(segments, text.substring(cursor));
+        return segments;
+    }
+
+    private static void addSegment(List<String> segments, String value) {
+        if (value != null && !value.trim().isEmpty()) {
+            segments.add(value.trim());
+        }
+    }
+
+    private static char matchingClose(char open) {
+        switch (open) {
+            case '\u300a': return '\u300b';
+            case '<': return '>';
+            case '\u300c': return '\u300d';
+            case '\u3010': return '\u3011';
+            case '[': return ']';
+            case '(': return ')';
+            case '\uff08': return '\uff09';
+            default: return 0;
+        }
+    }
+
+    public static boolean isSeparatorChar(char value) {
         switch (value) {
             case '-':
             case '_':

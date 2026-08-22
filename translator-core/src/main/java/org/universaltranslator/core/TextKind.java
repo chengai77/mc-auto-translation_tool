@@ -1,6 +1,6 @@
 package org.universaltranslator.core;
 
-/** The screen or world surface on which server-provided text appears. */
+/** 文本来源界面 */
 public enum TextKind {
     CHAT,
     SYSTEM_MESSAGE,

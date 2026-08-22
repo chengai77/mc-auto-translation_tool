@@ -1,6 +1,6 @@
 package org.universaltranslator.core;
 
-/** Formatting helpers shared by modern and legacy render bridges. */
+/** 样式辅助 */
 public final class TranslationTextStyling {
     private TranslationTextStyling() {
     }

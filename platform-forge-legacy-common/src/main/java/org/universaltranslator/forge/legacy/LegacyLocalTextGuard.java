@@ -7,7 +7,7 @@ import org.universaltranslator.core.TranslationTextStyling;
 
 import java.lang.reflect.Field;
 
-/** Identifies text currently being edited by the local player in the legacy chat box. */
+/** 旧版本地输入识别 */
 final class LegacyLocalTextGuard {
     private static volatile Field chatField;
     private static volatile boolean searched;

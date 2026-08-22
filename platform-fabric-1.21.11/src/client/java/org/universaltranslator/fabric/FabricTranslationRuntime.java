@@ -4,34 +4,41 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 import org.universaltranslator.core.RenderTranslationSession;
 import org.universaltranslator.core.PersistentTranslationCache;
+import org.universaltranslator.core.ProtectedLiteralsSnapshot;
 import org.universaltranslator.core.TextKind;
 import org.universaltranslator.core.TranslationCache;
+import org.universaltranslator.core.TranslationCacheOperations;
 import org.universaltranslator.core.TranslationProvider;
 import org.universaltranslator.core.TranslationProviderStatus;
 import org.universaltranslator.core.TranslationDiagnosticsSnapshot;
 import org.universaltranslator.core.TranslationStore;
 import org.universaltranslator.core.TranslationTextColor;
+import org.universaltranslator.core.TranslationDisplayText;
 import org.universaltranslator.core.RecentUserText;
+import org.universaltranslator.core.StyledTranslationTemplate;
 import org.universaltranslator.core.TranslationResult;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 final class FabricTranslationRuntime {
     private static final long PLAYER_NAME_SNAPSHOT_MILLIS = 5_000L;
-    // Match ProtectedText's bounded literal limit so large network lobbies do not silently
-    // drop names after the first few tab-list pages.
+    // 对齐保护上限
+    // 避免截断名单
     private static final int MAX_PROTECTED_PLAYER_NAMES = 1_000;
 
     private static volatile RenderTranslationSession session;
+    private static volatile TranslationStore cacheStore;
+    private static volatile boolean cacheStoreDisk;
+    private static volatile Path cacheStoreFile;
     private static volatile FabricConfig activeConfig;
     private static volatile TranslationProvider activeProvider;
-    private static volatile List<String> protectedPlayerNames = Collections.emptyList();
+    private static volatile ProtectedLiteralsSnapshot protectedPlayerNames =
+            ProtectedLiteralsSnapshot.empty();
     private static volatile long protectedPlayerNamesExpireAt;
     private static final RecentUserText RECENT_USER_TEXT = new RecentUserText();
     private static CompletableFuture<Void> outgoingTail = CompletableFuture.completedFuture(null);
@@ -48,9 +55,7 @@ final class FabricTranslationRuntime {
         }
         TranslationProvider provider = config.createProvider();
         activeProvider = provider;
-        TranslationStore store = config.diskCache
-                ? new PersistentTranslationCache(config.cacheFile, 10_000)
-                : new TranslationCache(10_000);
+        TranslationStore store = prepareCacheStore(config);
         int workers = provider.id().contains("offline-llama:") ? 1 : 4;
         RenderTranslationSession created = new RenderTranslationSession(
                 provider, "auto", config.targetLanguage, store, workers, config.displayMode,
@@ -78,22 +83,54 @@ final class FabricTranslationRuntime {
     }
 
     static String translateForRender(String original, TextKind kind) {
+        return translateForRender(original, original, kind, false, false);
+    }
+
+    static String translateCompleteForRender(String original, TextKind kind) {
+        return translateForRender(original, original, kind, true, false);
+    }
+
+    static String translateCompleteForRender(
+            String request, String visibleOriginal, TextKind kind) {
+        return translateForRender(request, visibleOriginal, kind, true, false);
+    }
+
+    static String translatePlainHologramForRender(
+            String request, String visibleOriginal) {
+        return translateForRender(
+                request, visibleOriginal, TextKind.HOLOGRAM, false, true);
+    }
+
+    private static String translateForRender(
+            String original,
+            String visibleOriginal,
+            TextKind kind,
+            boolean completeText,
+            boolean plainHologram) {
         RenderTranslationSession active = session;
         FabricConfig config = activeConfig;
         MinecraftClient client = MinecraftClient.getInstance();
+        String guardText = visibleOriginal == null ? original : visibleOriginal;
         if (active == null || config == null || !config.allows(kind)
                 || client.currentScreen instanceof UniversalTranslatorConfigScreen
+                || client.currentScreen instanceof UniversalTranslatorProviderScreen
+                || client.currentScreen instanceof UniversalTranslatorDeepSeekConfigScreen
                 || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
+                || client.currentScreen instanceof UniversalTranslatorCacheScreen
                 || client.currentScreen instanceof TranslationLogScreen
                 || client.currentScreen instanceof TranslationLogSourceScreen
-                || FabricLocalTextGuard.isLocalChatInput(client, original)
-                || RECENT_USER_TEXT.shouldPreserve(original)
+                || FabricLocalTextGuard.isLocalChatInput(client, guardText)
+                || RECENT_USER_TEXT.shouldPreserve(guardText)
                 || client.world == null || client.getNetworkHandler() == null) {
             return original;
         }
-        String translated = active.lookup(original, kind);
+        String translated = plainHologram
+                ? active.lookupPlainHologram(original)
+                : completeText
+                ? active.lookupComplete(original, kind) : active.lookup(original, kind);
         if (shouldRecordInLog(kind)) {
-            TranslationLog.add(original, displayTranslatedOnly(translated));
+            TranslationLog.add(guardText,
+                    StyledTranslationTemplate.strip(displayTranslatedOnly(translated)));
         }
         return translated;
     }
@@ -110,7 +147,10 @@ final class FabricTranslationRuntime {
         if (active == null || config == null || !config.allows(effectiveKind)
                 || original == null || original.trim().isEmpty() || original.length() > 80
                 || client.currentScreen instanceof UniversalTranslatorConfigScreen
+                || client.currentScreen instanceof UniversalTranslatorProviderScreen
+                || client.currentScreen instanceof UniversalTranslatorDeepSeekConfigScreen
                 || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
+                || client.currentScreen instanceof UniversalTranslatorCacheScreen
                 || client.currentScreen instanceof TranslationLogScreen
                 || client.currentScreen instanceof TranslationLogSourceScreen
                 || client.world == null || client.getNetworkHandler() == null) {
@@ -143,7 +183,7 @@ final class FabricTranslationRuntime {
                     if (translated == null || translated.equals(original)) {
                         return;
                     }
-                    Text styled = BookTextStyler.rebuild(text, translated, text.getStyle());
+                    Text styled = BookTextStyler.rebuild(text, translated, text.getStyle(), kind);
                     final Text output = styled == null
                             ? Text.literal(translated).setStyle(text.getStyle()) : styled;
                     client.execute(() -> replayUrgentHudText(kind, output, overlayTinted));
@@ -180,17 +220,62 @@ final class FabricTranslationRuntime {
 
     static void clearTranslationHistory() {
         TranslationLog.clear();
+        HologramTextDisplayGroups.clear();
         RenderTranslationSession active = session;
         if (active != null) {
             active.clearRenderedTranslations();
         }
     }
 
+    static synchronized int importCache(Path source) throws IOException {
+        RenderTranslationSession active = session;
+        return active == null
+                ? TranslationCacheOperations.importInto(requireCacheStore(), source)
+                : active.importCache(source);
+    }
+
+    static synchronized Path exportCache(Path target) throws IOException {
+        RenderTranslationSession active = session;
+        return active == null
+                ? TranslationCacheOperations.exportFrom(requireCacheStore(), target)
+                : active.exportCache(target);
+    }
+
+    static synchronized void clearCacheFile() throws IOException {
+        RenderTranslationSession active = session;
+        if (active == null) {
+            TranslationCacheOperations.clear(requireCacheStore());
+        } else {
+            active.clearCacheFile();
+        }
+    }
+
+    private static TranslationStore requireCacheStore() throws IOException {
+        FabricConfig config = activeConfig;
+        if (config == null) {
+            throw new IOException("Translation settings are not initialized");
+        }
+        return prepareCacheStore(config);
+    }
+
+    private static TranslationStore prepareCacheStore(FabricConfig config) throws IOException {
+        Path file = config.cacheFile.toAbsolutePath().normalize();
+        if (cacheStore == null || cacheStoreDisk != config.diskCache || !file.equals(cacheStoreFile)) {
+            cacheStore = config.diskCache
+                    ? new PersistentTranslationCache(file, 10_000)
+                    : new TranslationCache(10_000);
+            cacheStoreDisk = config.diskCache;
+            cacheStoreFile = file;
+        }
+        return cacheStore;
+    }
+
     static synchronized void shutdown() {
         RenderTranslationSession active = session;
         session = null;
+        HologramTextDisplayGroups.clear();
         activeProvider = null;
-        protectedPlayerNames = Collections.emptyList();
+        protectedPlayerNames = ProtectedLiteralsSnapshot.empty();
         protectedPlayerNamesExpireAt = 0L;
         RECENT_USER_TEXT.clear();
         outgoingTail = CompletableFuture.completedFuture(null);
@@ -199,14 +284,14 @@ final class FabricTranslationRuntime {
         }
     }
 
-    private static synchronized List<String> playerNameSnapshot() {
+    private static synchronized ProtectedLiteralsSnapshot playerNameSnapshot() {
         long now = System.currentTimeMillis();
         if (now < protectedPlayerNamesExpireAt) {
             return protectedPlayerNames;
         }
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.getNetworkHandler() == null) {
-            protectedPlayerNames = Collections.emptyList();
+            protectedPlayerNames = ProtectedLiteralsSnapshot.empty();
         } else {
             List<String> names = new ArrayList<String>();
             addProtectedLiteral(names, client.getSession().getUsername());
@@ -220,7 +305,7 @@ final class FabricTranslationRuntime {
                 String name = entry.getProfile().name();
                 addProtectedLiteral(names, name);
             });
-            protectedPlayerNames = Collections.unmodifiableList(names);
+            protectedPlayerNames = ProtectedLiteralsSnapshot.of(names);
         }
         protectedPlayerNamesExpireAt = now + PLAYER_NAME_SNAPSHOT_MILLIS;
         return protectedPlayerNames;
@@ -242,8 +327,8 @@ final class FabricTranslationRuntime {
         TranslationProvider provider = activeProvider;
         String providerStatus = provider instanceof TranslationProviderStatus
                 ? ((TranslationProviderStatus) provider).status() : "";
-        // The offline provider already has the specific startup diagnostic. Prefer it over the
-        // session's generic wrapper so one failure cannot alternate between two chat messages.
+        // 优先离线诊断
+        // 避免诊断跳变
         if (providerStatus.startsWith("离线翻译失败")) {
             return providerStatus;
         }
@@ -288,7 +373,10 @@ final class FabricTranslationRuntime {
         MinecraftClient client = MinecraftClient.getInstance();
         if (active == null || config == null || !config.allows(kind)
                 || client.currentScreen instanceof UniversalTranslatorConfigScreen
+                || client.currentScreen instanceof UniversalTranslatorProviderScreen
+                || client.currentScreen instanceof UniversalTranslatorDeepSeekConfigScreen
                 || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
+                || client.currentScreen instanceof UniversalTranslatorCacheScreen
                 || client.currentScreen instanceof TranslationLogScreen
                 || client.currentScreen instanceof TranslationLogSourceScreen
                 || TranslationRenderContext.isTextInput()
@@ -308,7 +396,10 @@ final class FabricTranslationRuntime {
         MinecraftClient client = MinecraftClient.getInstance();
         if (active == null || config == null || !config.allows(kind)
                 || client.currentScreen instanceof UniversalTranslatorConfigScreen
+                || client.currentScreen instanceof UniversalTranslatorProviderScreen
+                || client.currentScreen instanceof UniversalTranslatorDeepSeekConfigScreen
                 || client.currentScreen instanceof UniversalTranslatorDiagnosticsScreen
+                || client.currentScreen instanceof UniversalTranslatorCacheScreen
                 || client.currentScreen instanceof TranslationLogScreen
                 || client.currentScreen instanceof TranslationLogSourceScreen
                 || TranslationRenderContext.isTextInput()
@@ -356,8 +447,9 @@ final class FabricTranslationRuntime {
         if (value == null) {
             return "";
         }
-        int separator = value.indexOf("\n");
-        return separator >= 0 ? value.substring(separator + 1) : value;
+        FabricConfig config = activeConfig;
+        return TranslationDisplayText.translatedOnly(
+                value, config == null ? null : config.displayMode);
     }
 
     static void protectOutgoingMessage(String message) {
@@ -370,16 +462,15 @@ final class FabricTranslationRuntime {
                 && message != null && !message.trim().isEmpty() && !message.startsWith("/");
     }
 
-    /** Serializes outgoing requests so rapidly sent chat lines keep their original order. */
+    /** 发送顺序序列化 */
     static synchronized CompletableFuture<TranslationResult> translateOutgoing(String message) {
         final RenderTranslationSession active = session;
         final FabricConfig config = activeConfig;
         if (active == null || config == null || !shouldTranslateOutgoing(message)) {
             return CompletableFuture.completedFuture(TranslationResult.unchanged(message));
         }
-        RECENT_USER_TEXT.remember(message);
-        // Capture the tab-list/server literals on Minecraft's calling thread. The translation
-        // itself may finish on a worker, but must not inspect client network state there.
+        // 主线程取字面
+        // 工作线程不查网络
         CompletableFuture<TranslationResult> translated = active.translateInteractive(
                 message, TextKind.CHAT, config.outgoingTargetLanguage, false);
         CompletableFuture<TranslationResult> next = outgoingTail

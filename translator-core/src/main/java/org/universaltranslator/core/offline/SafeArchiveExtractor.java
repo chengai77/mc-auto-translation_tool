@@ -17,7 +17,7 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-/** Minimal ZIP and tar.gz extractor with traversal and symlink-target validation. */
+/** 安全解压 */
 public final class SafeArchiveExtractor {
     private SafeArchiveExtractor() {
     }

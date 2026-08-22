@@ -8,7 +8,7 @@ import net.minecraft.client.resources.I18n;
 
 import java.io.IOException;
 
-/** Tencent Hunyuan credential settings shared by Forge 1.8.9 and 1.12.2. */
+/** 旧版混元凭证 */
 final class LegacyTencentConfigScreen extends GuiScreen {
     private static final int SAVE = 1;
     private static final int CANCEL = 2;

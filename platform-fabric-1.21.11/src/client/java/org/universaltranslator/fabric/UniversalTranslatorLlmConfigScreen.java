@@ -6,7 +6,7 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 
-/** Local-only editor for custom OpenAI-compatible API settings. */
+/** 自定义API配置 */
 final class UniversalTranslatorLlmConfigScreen extends Screen {
     private final UniversalTranslatorConfigScreen parent;
     private final String initialEndpoint;

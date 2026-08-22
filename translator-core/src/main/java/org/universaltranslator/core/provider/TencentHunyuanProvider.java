@@ -12,7 +12,7 @@ import java.net.URI;
 import java.util.Locale;
 import java.util.Map;
 
-/** Tencent Hunyuan ChatTranslations provider using the maintained API 3.0 endpoint. */
+/** 腾讯混元提供 */
 public final class TencentHunyuanProvider implements TranslationProvider {
     private static final URI ENDPOINT = URI.create("https://hunyuan.tencentcloudapi.com/");
     private static final String HOST = "hunyuan.tencentcloudapi.com";

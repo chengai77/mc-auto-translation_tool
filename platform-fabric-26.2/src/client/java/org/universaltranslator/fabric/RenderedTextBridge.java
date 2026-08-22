@@ -2,29 +2,26 @@ package org.universaltranslator.fabric;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.FontDescription;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
+import org.universaltranslator.core.ChatMessageClassifier;
+import org.universaltranslator.core.InlineTextureCode;
 import org.universaltranslator.core.LanguageHeuristics;
+import org.universaltranslator.core.StyledTranslationTemplate;
 import org.universaltranslator.core.TranslationTextColor;
 import org.universaltranslator.core.TranslationTextStyling;
 import org.universaltranslator.core.TextKind;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public final class RenderedTextBridge {
     private static final AtomicBoolean ITEM_TOOLTIP_REACHED = new AtomicBoolean();
     private static final AtomicBoolean ITEM_TOOLTIP_APPLIED = new AtomicBoolean();
     private static final ThreadLocal<Boolean> BOOK_PAGE_PENDING = new ThreadLocal<Boolean>();
-    private static final Pattern INLINE_TEXTURE_MARKER =
-            Pattern.compile("\\[(?:[A-Za-z0-9_.-]+:)?[A-Za-z0-9_.-]+/[A-Za-z0-9_./:-]+\\]");
 
     private RenderedTextBridge() {
     }
@@ -63,20 +60,29 @@ public final class RenderedTextBridge {
         if (original.equals(translated)) {
             return text;
         }
-        StyledTextSnapshot snapshot = styledText(text, original, text.getStyle());
-        Component rebuilt = rebuildInlineTextureText(snapshot, translated, text.getStyle());
-        if (rebuilt != null) {
-            return rebuilt;
-        }
-        rebuilt = BookTextStyler.rebuild(text, translated, text.getStyle());
-        if (rebuilt != null) {
-            return rebuilt;
-        }
-        return Component.literal(translated).setStyle(translatedStyle(text.getStyle()));
+        return rebuildStyledText(text, original, translated, currentKind);
     }
 
     public static Component translateBookPage(Component text) {
         return translateDirectText(text, TextKind.BOOK);
+    }
+
+    public static Component translateHologramText(Component text) {
+        return translateCompleteText(text, TextKind.HOLOGRAM);
+    }
+
+    public static Component translatePlainHologramText(Component text) {
+        if (text == null) {
+            return null;
+        }
+        String visibleOriginal = text.getString();
+        String original = InlineTextureText.semanticText(text, text.getStyle());
+        String translated = FabricTranslationRuntime.translatePlainHologramForRender(
+                original, visibleOriginal);
+        if (original.equals(translated)) {
+            return text;
+        }
+        return rebuildStyledText(text, original, translated, TextKind.HOLOGRAM);
     }
 
     public static void beginBookPageRender() {
@@ -116,34 +122,54 @@ public final class RenderedTextBridge {
         if (currentKind == TextKind.CHAT || currentKind == TextKind.SYSTEM_MESSAGE) {
             return text;
         }
-        StyledTextSnapshot snapshot = styledText(text);
-        String original = snapshot.text();
+        String original = InlineTextureText.text(text);
+        Style firstStyle = InlineTextureText.firstStyle(text);
         String translated = translateRaw(original, null, currentKind);
         if (original.equals(translated)) {
             return text;
         }
-        Component rebuilt = rebuildInlineTextureText(snapshot, translated, snapshot.firstStyle());
+        Component rebuilt = InlineTextureText.rebuild(
+                text, original, translated, firstStyle);
         if (rebuilt != null) {
             return rebuilt.getVisualOrderText();
         }
-        MutableComponent replacement = Component.literal(translated).setStyle(translatedStyle(snapshot.firstStyle()));
+        if (hasInlineTexture(original)) {
+            return text;
+        }
+        MutableComponent replacement = Component.literal(translated).setStyle(translatedStyle(firstStyle));
         return replacement.getVisualOrderText();
     }
 
     public static FormattedText translateChatMessage(FormattedText text) {
+        return translateChatMessage(text, false);
+    }
+
+    public static FormattedText translateChatMessage(
+            FormattedText text, boolean playerMessage) {
         if (text == null || TranslationRenderContext.isTextInput()
                 || TranslationRenderContext.isTranslationSuppressed()) {
             return text;
         }
         String original = text.getString();
-        String translated = FabricTranslationRuntime.translateForRender(
-                original, TextKind.CHAT);
-        if (original.equals(translated)) {
+        TextKind kind = playerMessage || ChatMessageClassifier.looksLikePlayerChat(original)
+                ? TextKind.CHAT : TextKind.SYSTEM_MESSAGE;
+        Style style = text instanceof Component ? ((Component) text).getStyle() : Style.EMPTY;
+        String request = StyledChatText.translationInput(text, style);
+        String translated = FabricTranslationRuntime.translateCompleteForRender(
+                request, original, kind);
+        if (request.equals(translated)) {
             return text;
         }
-        Style style = text instanceof Component ? ((Component) text).getStyle() : Style.EMPTY;
         FormattedText rebuilt = StyledChatText.rebuild(text, translated, style);
-        return rebuilt == null ? FormattedText.of(translated, translatedStyle(style)) : rebuilt;
+        if (!(rebuilt instanceof Component)) {
+            return text;
+        }
+        Component base = (Component) rebuilt;
+        Component textured = InlineTextureText.restore(text, base, style);
+        if (textured != null) {
+            return textured;
+        }
+        return hasInlineTexture(request) ? text : base;
     }
 
     public static FormattedText translate(FormattedText text) {
@@ -158,15 +184,20 @@ public final class RenderedTextBridge {
         if (original.equals(translated)) {
             return text;
         }
-        return FormattedText.of(translated, translatedStyle(Style.EMPTY));
+        Component base = Component.literal(translated).setStyle(translatedStyle(Style.EMPTY));
+        Component textured = InlineTextureText.restore(text, original, base, Style.EMPTY);
+        if (textured != null) {
+            return textured;
+        }
+        return hasInlineTexture(original) ? text : base;
     }
 
-    /** Translates item names and lore before GuiGraphicsExtractor creates tooltip components. */
+    /** 提示框前翻译 */
     public static List<Component> translateTooltip(List<Component> lines) {
         return translateTooltip(lines, false);
     }
 
-    /** Canonical Screen.getTooltipFromItem hook for inventories and containers. */
+    /** 物品提示钩子 */
     public static List<Component> translateItemTooltip(List<Component> lines) {
         if (ITEM_TOOLTIP_REACHED.compareAndSet(false, true)) {
             System.out.println("[MC Auto Translation Tool] Item tooltip producer reached");
@@ -197,13 +228,8 @@ public final class RenderedTextBridge {
                 if (replacement == null) {
                     replacement = new ArrayList<Component>(lines);
                 }
-                Component rebuilt = rebuildInlineTextureText(
-                        styledText(line, original, line.getStyle()),
-                        translated,
-                        line.getStyle());
-                replacement.set(index, rebuilt == null
-                        ? Component.literal(translated).setStyle(translatedStyle(line.getStyle()))
-                        : rebuilt);
+                replacement.set(index, rebuildStyledText(
+                        line, original, translated, tooltipKind));
             }
         }
         if (itemTooltip && replacement != null
@@ -226,16 +252,55 @@ public final class RenderedTextBridge {
         if (original.equals(translated)) {
             return text;
         }
-        StyledTextSnapshot snapshot = styledText(text, original, text.getStyle());
-        Component rebuilt = rebuildInlineTextureText(snapshot, translated, text.getStyle());
-        if (rebuilt != null) {
-            return rebuilt;
+        return rebuildStyledText(text, original, translated, kind);
+    }
+
+    private static Component translateCompleteText(Component text, TextKind kind) {
+        if (text == null) {
+            return null;
         }
-        rebuilt = BookTextStyler.rebuild(text, translated, text.getStyle());
-        if (rebuilt != null) {
-            return rebuilt;
+        String visibleOriginal = text.getString();
+        Style style = text.getStyle();
+        String original = InlineTextureText.semanticText(text, style);
+        String request = StyledChatText.translationInput(text, style);
+        String translated = FabricTranslationRuntime.translateCompleteForRender(
+                request, visibleOriginal, kind);
+        if (request.equals(translated)) {
+            return text;
         }
-        return Component.literal(translated).setStyle(translatedStyle(text.getStyle()));
+        FormattedText structured = StyledChatText.rebuild(text, translated, style);
+        Component base = structured instanceof Component ? (Component) structured : null;
+        if (base == null) {
+            String plain = StyledTranslationTemplate.strip(translated);
+            base = BookTextStyler.rebuild(text, plain, style, kind);
+            if (base == null) {
+                base = Component.literal(plain).setStyle(translatedStyle(style));
+            }
+        }
+        Component textured = InlineTextureText.restore(text, original, base, style);
+        if (textured != null) {
+            return textured;
+        }
+        return hasInlineTexture(original) ? text : base;
+    }
+
+    private static Component rebuildStyledText(
+            Component source, String original, String translated, TextKind kind) {
+        Component base = BookTextStyler.rebuild(
+                source, translated, source.getStyle(), kind);
+        if (base == null) {
+            base = Component.literal(translated).setStyle(translatedStyle(source.getStyle()));
+        }
+        Component textured = InlineTextureText.restore(
+                source, original, base, source.getStyle());
+        if (textured != null) {
+            return textured;
+        }
+        return hasInlineTexture(original) ? source : base;
+    }
+
+    private static boolean hasInlineTexture(String text) {
+        return InlineTextureCode.matcher(text).find();
     }
 
     private static boolean shouldRetryDirectText(String original, TextKind kind) {
@@ -273,7 +338,7 @@ public final class RenderedTextBridge {
         return FabricTranslationRuntime.translateForRender(text, currentKind);
     }
 
-    private static Style translatedStyle(Style original) {
+    static Style translatedStyle(Style original) {
         if (original == null) {
             original = Style.EMPTY;
         }
@@ -293,219 +358,4 @@ public final class RenderedTextBridge {
         }
     }
 
-    private static StyledTextSnapshot styledText(FormattedCharSequence text) {
-        final StringBuilder value = new StringBuilder();
-        final List<StyleSpan> spans = new ArrayList<StyleSpan>();
-        text.accept((index, style, codePoint) -> {
-            int start = value.length();
-            value.appendCodePoint(codePoint);
-            spans.add(new StyleSpan(start, value.length(), style == null ? Style.EMPTY : style));
-            return true;
-        });
-        return new StyledTextSnapshot(value.toString(), spans, Style.EMPTY);
-    }
-
-    private static StyledTextSnapshot styledText(
-            FormattedCharSequence text,
-            String fallbackText,
-            Style fallbackStyle
-    ) {
-        StyledTextSnapshot snapshot = styledText(text);
-        if (snapshot.text().equals(fallbackText)) {
-            return snapshot;
-        }
-        return StyledTextSnapshot.plain(fallbackText, fallbackStyle);
-    }
-
-    private static StyledTextSnapshot styledText(Component text, String fallbackText, Style fallbackStyle) {
-        final StringBuilder value = new StringBuilder();
-        final List<StyleSpan> spans = new ArrayList<StyleSpan>();
-        text.visit((style, part) -> {
-            if (part != null && !part.isEmpty()) {
-                int start = value.length();
-                value.append(part);
-                spans.add(new StyleSpan(start, value.length(), style == null ? Style.EMPTY : style));
-            }
-            return Optional.empty();
-        }, Style.EMPTY);
-        StyledTextSnapshot snapshot = new StyledTextSnapshot(value.toString(), spans, fallbackStyle);
-        if (snapshot.text().equals(fallbackText)) {
-            return snapshot;
-        }
-        return styledText(text.getVisualOrderText(), fallbackText, fallbackStyle);
-    }
-
-    private static Component rebuildInlineTextureText(
-            StyledTextSnapshot snapshot,
-            String translated,
-            Style fallbackStyle
-    ) {
-        List<StyledMarker> sourceMarkers = snapshot.inlineTextureMarkers();
-        if (sourceMarkers.isEmpty() || !INLINE_TEXTURE_MARKER.matcher(translated).find()) {
-            return null;
-        }
-        Matcher matcher = INLINE_TEXTURE_MARKER.matcher(translated);
-        MutableComponent output = Component.empty();
-        Style textStyle = translatedStyle(plainTextStyle(
-                snapshot.firstNonMarkerStyle(sourceMarkers, fallbackStyle)));
-        int cursor = 0;
-        int markerIndex = 0;
-        while (matcher.find()) {
-            if (markerIndex >= sourceMarkers.size()) {
-                return null;
-            }
-            StyledMarker sourceMarker = sourceMarkers.get(markerIndex++);
-            if (!sourceMarker.text().equals(matcher.group())) {
-                return null;
-            }
-            appendStyled(output, translated.substring(cursor, matcher.start()), textStyle);
-            Style markerStyle = renderableMarkerStyle(sourceMarker.style());
-            if (markerStyle != null) {
-                appendStyled(output, matcher.group(), markerStyle);
-            }
-            cursor = matcher.end();
-        }
-        if (markerIndex != sourceMarkers.size()) {
-            return null;
-        }
-        appendStyled(output, translated.substring(cursor), textStyle);
-        return output;
-    }
-
-    private static Style plainTextStyle(Style style) {
-        return style == null ? Style.EMPTY : style.withFont(FontDescription.DEFAULT);
-    }
-
-    private static Style renderableMarkerStyle(Style style) {
-        if (style == null || FontDescription.DEFAULT.equals(style.getFont())) {
-            return null;
-        }
-        return style;
-    }
-
-    private static void appendStyled(MutableComponent output, String value, Style style) {
-        if (value != null && !value.isEmpty()) {
-            output.append(Component.literal(value).setStyle(style == null ? Style.EMPTY : style));
-        }
-    }
-
-    private static final class StyledTextSnapshot {
-        private final String text;
-        private final List<StyleSpan> spans;
-        private final Style fallbackStyle;
-
-        private StyledTextSnapshot(String text, List<StyleSpan> spans, Style fallbackStyle) {
-            this.text = text == null ? "" : text;
-            this.spans = spans;
-            this.fallbackStyle = fallbackStyle == null ? Style.EMPTY : fallbackStyle;
-        }
-
-        static StyledTextSnapshot plain(String text, Style style) {
-            List<StyleSpan> spans = new ArrayList<StyleSpan>();
-            if (text != null && !text.isEmpty()) {
-                spans.add(new StyleSpan(0, text.length(), style == null ? Style.EMPTY : style));
-            }
-            return new StyledTextSnapshot(text, spans, style);
-        }
-
-        String text() {
-            return text;
-        }
-
-        Style firstStyle() {
-            return spans.isEmpty() ? fallbackStyle : spans.get(0).style();
-        }
-
-        List<StyledMarker> inlineTextureMarkers() {
-            List<StyledMarker> markers = new ArrayList<StyledMarker>();
-            Matcher matcher = INLINE_TEXTURE_MARKER.matcher(text);
-            while (matcher.find()) {
-                markers.add(new StyledMarker(
-                        matcher.start(), matcher.end(), matcher.group(), styleAt(matcher.start())));
-            }
-            return markers;
-        }
-
-        Style firstNonMarkerStyle(List<StyledMarker> markers, Style fallback) {
-            for (StyleSpan span : spans) {
-                if (!insideMarker(span.start(), markers)
-                        && !text.substring(span.start(), span.end()).trim().isEmpty()) {
-                    return span.style();
-                }
-            }
-            return fallback == null ? fallbackStyle : fallback;
-        }
-
-        private Style styleAt(int index) {
-            for (StyleSpan span : spans) {
-                if (index >= span.start() && index < span.end()) {
-                    return span.style();
-                }
-            }
-            return fallbackStyle;
-        }
-
-        private static boolean insideMarker(int index, List<StyledMarker> markers) {
-            for (StyledMarker marker : markers) {
-                if (index >= marker.start() && index < marker.end()) {
-                    return true;
-                }
-            }
-            return false;
-        }
-    }
-
-    private static final class StyleSpan {
-        private final int start;
-        private final int end;
-        private final Style style;
-
-        private StyleSpan(int start, int end, Style style) {
-            this.start = start;
-            this.end = end;
-            this.style = style == null ? Style.EMPTY : style;
-        }
-
-        int start() {
-            return start;
-        }
-
-        int end() {
-            return end;
-        }
-
-        Style style() {
-            return style;
-        }
-    }
-
-    private static final class StyledMarker {
-        private final int start;
-        private final int end;
-        private final String text;
-        private final Style style;
-
-        private StyledMarker(int start, int end, String text, Style style) {
-            this.start = start;
-            this.end = end;
-            this.text = text;
-            this.style = style == null ? Style.EMPTY : style;
-        }
-
-        int start() {
-            return start;
-        }
-
-        int end() {
-            return end;
-        }
-
-        String text() {
-            return text;
-        }
-
-        Style style() {
-            return style;
-        }
-    }
 }

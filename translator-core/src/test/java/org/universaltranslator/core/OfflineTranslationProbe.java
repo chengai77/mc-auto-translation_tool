@@ -5,7 +5,7 @@ import org.universaltranslator.core.provider.OpenAiChatTranslationProvider;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
-/** Manual loopback probe that exercises the real offline model through all protection layers. */
+/** 离线模型探测 */
 public final class OfflineTranslationProbe {
     private OfflineTranslationProbe() {
     }

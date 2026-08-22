@@ -9,7 +9,7 @@ import org.universaltranslator.core.net.JsonStrings;
 
 import java.net.URI;
 
-/** LibreTranslate-compatible provider for local or user-selected hosted instances. */
+/** LibreTranslate */
 public final class LibreTranslateProvider implements TranslationProvider {
     private final URI endpoint;
     private final String apiKey;

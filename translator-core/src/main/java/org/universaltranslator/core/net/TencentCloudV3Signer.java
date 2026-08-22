@@ -11,7 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
 
-/** Dependency-free implementation of Tencent Cloud API 3.0 TC3-HMAC-SHA256 signing. */
+/** 腾讯云V3签名 */
 public final class TencentCloudV3Signer {
     private static final String ALGORITHM = "TC3-HMAC-SHA256";
     private static final String CONTENT_TYPE = "application/json; charset=utf-8";

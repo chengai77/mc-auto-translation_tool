@@ -1,6 +1,6 @@
 package org.universaltranslator.core;
 
-/** Controls whether the rendered result replaces or accompanies the original server text. */
+/** 显示模式控制 */
 public enum TranslationDisplayMode {
     TRANSLATED_ONLY,
     ORIGINAL_AND_TRANSLATED;

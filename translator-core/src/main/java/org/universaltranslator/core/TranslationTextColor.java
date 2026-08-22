@@ -2,7 +2,7 @@ package org.universaltranslator.core;
 
 import java.util.Locale;
 
-/** Color applied to completed translations so users can distinguish translated text. */
+/** 译文着色 */
 public enum TranslationTextColor {
     ORIGINAL("original", '\0'),
     AQUA("aqua", 'b'),

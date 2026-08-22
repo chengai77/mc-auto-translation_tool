@@ -1,7 +1,6 @@
 package org.universaltranslator.fabric.mixin;
 
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.util.FormattedCharSequence;
 import org.spongepowered.asm.mixin.Mixin;
@@ -10,9 +9,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.universaltranslator.core.TextKind;
 import org.universaltranslator.fabric.RenderedTextBridge;
+import org.universaltranslator.fabric.TranslationBypassText;
 import org.universaltranslator.fabric.TranslationRenderContext;
 
-/** Captures world-space text such as nameplates, holograms, signs and display entities. */
+/** 捕获世界文本 */
 @Mixin(Font.class)
 abstract class TextRendererMixin {
     @Shadow
@@ -31,12 +31,15 @@ abstract class TextRendererMixin {
             at = @At("HEAD"), argsOnly = true)
     private FormattedCharSequence universalTranslator$translatePreparedOrderedText(
             FormattedCharSequence text) {
+        if (TranslationBypassText.isWrapped(text)) {
+            return text;
+        }
         return RenderedTextBridge.translate(
                 text, TranslationRenderContext.currentOr(defaultKind()));
     }
 
     private static TextKind defaultKind() {
-        return Minecraft.getInstance().screen == null ? TextKind.HOLOGRAM : TextKind.OTHER;
+        return TextKind.OTHER;
     }
 
     @ModifyVariable(method = "width(Ljava/lang/String;)I", at = @At("HEAD"), argsOnly = true)

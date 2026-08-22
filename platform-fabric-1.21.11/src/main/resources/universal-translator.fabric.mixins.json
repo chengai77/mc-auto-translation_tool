@@ -12,6 +12,8 @@
     "ScreenMixin",
     "SignEditScreenMixin",
     "TextFieldWidgetMixin",
+    "TextDisplayRenderStateMixin",
+    "TextDisplayRendererMixin",
     "TextRendererMixin",
     "ChatHudLineMixin",
     "SignRendererContextMixin",

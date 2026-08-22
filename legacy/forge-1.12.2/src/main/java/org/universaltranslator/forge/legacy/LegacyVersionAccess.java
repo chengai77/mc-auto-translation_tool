@@ -9,7 +9,7 @@ import net.minecraft.util.text.TextComponentString;
 
 import java.util.List;
 
-/** Compile-time adapter for names changed after Minecraft 1.8.9. */
+/** 编译名适配 */
 public final class LegacyVersionAccess {
     private LegacyVersionAccess() {
     }

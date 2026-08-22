@@ -2,7 +2,7 @@ package org.universaltranslator.core;
 
 import org.universaltranslator.core.provider.LibreTranslateProvider;
 
-/** One-shot loopback integration probe used by the development test script. */
+/** 回环集成探测 */
 public final class LibreTranslateProbe {
     public static void main(String[] args) throws Exception {
         if (args.length != 1) {

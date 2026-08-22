@@ -8,7 +8,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.universaltranslator.fabric.TranslationRenderContext;
 
-/** Keeps search boxes, chat fields and configuration fields as local user input. */
+/** 输入框本地化 */
 @Mixin(EditBox.class)
 abstract class TextFieldWidgetMixin {
     @Inject(

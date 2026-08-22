@@ -9,7 +9,7 @@ import net.minecraft.util.IChatComponent;
 
 import java.util.List;
 
-/** Compile-time adapter for Minecraft 1.8.9 MCP names. */
+/** 1.8.9名适配 */
 public final class LegacyVersionAccess {
     private LegacyVersionAccess() {
     }

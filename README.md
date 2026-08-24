@@ -4,7 +4,7 @@
 
 一个面向 Minecraft Java 版的公益、开源、纯客户端全界面翻译模组。
 
-[⬇️ 下载最新版](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/latest) ·
+[⬇️ 下载最新版](https://github.com/chengai77/mc-auto-translation_tool/releases) ·
 [🌐 官方下载页](https://mc-auto-translation-tool.wuxiangdan96.chatgpt.site/#download) ·
 [📚 文档中心](docs/README.md) · [📖 安装与使用说明](docs/Zh-cn/USER_GUIDE.md)
 
@@ -17,7 +17,7 @@ Action Bar、标题、Boss Bar、容器标题、物品名称与 Lore、告示牌
 
 ## 下载
 
-推荐从 [GitHub Releases 下载最新版](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/latest)。
+推荐从 [GitHub Releases 下载最新版](https://github.com/chengai77/mc-auto-translation_tool/releases)。
 请务必选择与你的 Minecraft 版本和模组加载器完全对应的文件：
 
 | Minecraft | 加载器 | 下载 |
@@ -29,8 +29,8 @@ Action Bar、标题、Boss Bar、容器标题、物品名称与 Lore、告示牌
 Minecraft 26.1 Fabric 的源码适配已合入并通过构建与主菜单启动检查，但当前尚未发布
 可下载 JAR。请勿把 1.21.11 文件用于 26.1。
 
-[查看全部版本与更新说明](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases) ·
-[SHA-256 校验文件](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/SHA256SUMS.txt)
+[查看全部版本与更新说明](https://github.com/chengai77/mc-auto-translation_tool/releases) ·
+[SHA-256 校验文件](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v1.1/SHA256SUMS.txt)
 
 ## 设计原则
 

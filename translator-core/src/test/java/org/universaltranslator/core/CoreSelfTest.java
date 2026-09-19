@@ -7,6 +7,7 @@ import org.universaltranslator.core.offline.VerifiedDownloader;
 import org.universaltranslator.core.offline.SafeArchiveExtractor;
 import org.universaltranslator.core.offline.OfflineEngineAsset;
 import org.universaltranslator.core.offline.OfflineProcessSupport;
+import org.universaltranslator.core.offline.OfflineStoragePaths;
 import org.universaltranslator.core.provider.FallbackTranslationProvider;
 import org.universaltranslator.core.provider.LlamaCppOfflineProvider;
 import org.universaltranslator.core.provider.OpenAiChatTranslationProvider;
@@ -28,6 +29,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,33 +45,43 @@ public final class CoreSelfTest {
     public static void main(String[] args) throws Exception {
         protectsDynamicScoreboardValues();
         preservesNumericQuantityAndPercentageSemantics();
+        normalizesStatusEffectLevels();
         repairsCachedStyledNumericGrammar();
         avoidsFalseNumericClassifiers();
         skipsAlreadyChineseAndNonTextValues();
+        normalizesAllCapsSourceText();
         protectsExistingChineseInMixedText();
         stylesCompletedTranslations();
         validatesSmallModelOutputs();
         retriesRejectedProviderOutputs();
         retriesRejectedStructuredProviderOutputs();
+        retriesAllCapsAfterStructuredRejection();
         keepsValidationFallbackStatusHealthy();
         preservesRecentUserMessages();
         classifiesPlayerChatMessages();
         cachesDynamicTemplates();
         deduplicatesConcurrentRequests();
+        reusesCacheAcrossConcurrentTextKinds();
         completesQueuedRequestsWhenClosed();
         fallsBackToOriginalOnFailure();
         enforcesSafeEndpoints();
         normalizesCustomOpenAiEndpoints();
         rejectsConversationalApiOutput();
         passesNumericHintsToOfflineLite();
+        rejectsQualityReferencePollution();
         handlesJsonStrings();
         updatesRenderLookupsWithoutBlocking();
         translatesTooltipLinesIndependently();
         translatesWrappedVisualLinesAsOneSentence();
+        translatesWrappedUiLinesAsOneSentence();
         keepsScoreboardRowsIndependent();
         joinsBookSentenceBreaksWithSpace();
         preservesBookMenuRows();
         preservesSeparatorLinesInStructuredText();
+        preservesVerticalSignGraphicLayout();
+        keepsSignModelRowAndLabelRowSeparate();
+        keepsSignSeparatorWithTrailingArrow();
+        preservesDecorativeSignLayout();
         preservesSignTokenPunctuation();
         translatesHologramTextBlocksAsOneSentence();
         groupsHologramsBeforeUsingFragmentTranslations();
@@ -79,6 +91,7 @@ public final class CoreSelfTest {
         validatesChineseConditionClauseOrder();
         repairsUnnaturalChineseConditionClauseOrder();
         alignsTranslatedHologramTops();
+        centersOnlyShortHologramPhrases();
         preservesCompleteHologramDateOrder();
         preservesHologramMenuAndTextureRows();
         keepsCrossLineStyledHologramSentencesTogether();
@@ -86,6 +99,7 @@ public final class CoreSelfTest {
         fallsBackWhenHologramBlockChangesProtectedTokens();
         preservesHologramBracketBoundaries();
         removesUnusedHologramSourceBlocks();
+        tracksMovingPlayerHologramsWithLag();
         translatesOutgoingChatAsynchronously();
         suppressesRecoverableRenderFailures();
         exposesRenderTranslationFailures();
@@ -96,6 +110,9 @@ public final class CoreSelfTest {
         reservesPendingCapacityForSystemMessages();
         rateLimitsBusyLobbyWithoutStarvingTooltips();
         urgentTitlesBypassBlockedNormalQueue();
+        displaysCompletedTitlesInArrivalOrder();
+        stabilizesRepeatedHudText();
+        coalescesChatRefreshRequests();
         foregroundMessagesBypassBlockedWorldQueue();
         systemMessagesBypassBlockedUrgentHudMessages();
         playerChatBypassesBlockedSystemMessages();
@@ -104,7 +121,9 @@ public final class CoreSelfTest {
         sharedQueueReservesForegroundCapacity();
         titleLookupsNeverBlockRenderThread();
         cacheHitsRenderImmediatelyAfterRestart();
+        migratesProviderScopedCacheAfterModelSwitch();
         dynamicHologramCacheHitsImmediatelyAfterRestart();
+        reusesCachedUiTextAcrossKinds();
         dynamicProtectedNamesAvoidUnprotectedCache();
         doesNotTranslateCompletedOutputAgain();
         persistsOnlyHashedCacheKeys();
@@ -129,7 +148,9 @@ public final class CoreSelfTest {
         passesGameHintsAndContextToProvider();
         prefersChinaDownloadSources();
         configuresWindowsOfflineRuntimePath();
+        recognizesOfflineLoopbackFailures();
         usesRelativeOfflineModelPath();
+        OfflineModelInstallationSelfTest.runAll();
         reportsOfflineStartupDiagnostics();
         matchesTencentCloudOfficialSignatureVector();
         keepsOriginalTextInBilingualMode();
@@ -139,6 +160,7 @@ public final class CoreSelfTest {
         reportsVerifiedDownloadProgress();
         extractsOfflineEngineArchivesSafely();
         normalizesOfflineModelSelections();
+        usesSharedOfflineStorageAcrossInstances();
         supportsTraditionalChineseTargets();
         formatsSecretFreeDiagnostics();
         localizesDiagnosticsAndRuntimeStatus();
@@ -168,6 +190,82 @@ public final class CoreSelfTest {
             assertTrue(result.isTranslated());
             assertEquals("Hello Steve_42", result.getTranslatedText());
         }
+    }
+
+    private static void displaysCompletedTitlesInArrivalOrder() {
+        OrderedDisplayQueue<String> queue = new OrderedDisplayQueue<String>(3, 1);
+        OrderedDisplayQueue.Ticket<String> first = queue.offer();
+        OrderedDisplayQueue.Ticket<String> second = queue.offer();
+        OrderedDisplayQueue.Ticket<String> third = queue.offer();
+        assertTrue(first != null && second != null && third != null);
+        assertEquals(null, queue.offer());
+        second.complete("second");
+        third.complete("third");
+        assertEquals(null, queue.tick());
+        first.complete("first");
+        assertEquals("first", queue.tick());
+        assertEquals(null, queue.tick());
+        assertEquals("second", queue.tick());
+        assertEquals(null, queue.tick());
+        assertEquals("third", queue.tick());
+    }
+
+    private static void stabilizesRepeatedHudText() {
+        RepeatingDisplayCache<String> cache =
+                new RepeatingDisplayCache<String>(2);
+        RepeatingDisplayCache.Claim<String> first = cache.acquire("action:deaths");
+        assertTrue(first.isClaimed());
+        assertEquals(null, first.displayedValue());
+
+        RepeatingDisplayCache.Claim<String> pending = cache.acquire("action:deaths");
+        assertFalse(pending.isClaimed());
+        assertEquals(null, pending.displayedValue());
+
+        cache.complete("action:deaths", "当前死亡次数：");
+        RepeatingDisplayCache.Claim<String> waiting = cache.acquire("action:deaths");
+        assertFalse(waiting.isClaimed());
+        assertEquals(null, waiting.displayedValue());
+
+        cache.markDisplayed("action:deaths");
+        RepeatingDisplayCache.Claim<String> displayed = cache.acquire("action:deaths");
+        assertFalse(displayed.isClaimed());
+        assertEquals("当前死亡次数：", displayed.displayedValue());
+
+        RepeatingDisplayCache.Claim<String> retry = cache.acquire("action:retry");
+        assertTrue(retry.isClaimed());
+        cache.fail("action:retry");
+        assertTrue(cache.acquire("action:retry").isClaimed());
+    }
+
+    private static void coalescesChatRefreshRequests() {
+        final ArrayDeque<Runnable> pending = new ArrayDeque<Runnable>();
+        final AtomicInteger updates = new AtomicInteger();
+        final AtomicReference<CoalescingUpdateQueue> reference =
+                new AtomicReference<CoalescingUpdateQueue>();
+        CoalescingUpdateQueue queue = new CoalescingUpdateQueue(
+                pending::addLast,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        if (updates.incrementAndGet() == 1) {
+                            reference.get().request();
+                        }
+                    }
+                });
+        reference.set(queue);
+
+        queue.request();
+        queue.request();
+        queue.request();
+        assertEquals(1, pending.size());
+
+        pending.removeFirst().run();
+        assertEquals(1, updates.get());
+        assertEquals(1, pending.size());
+
+        pending.removeFirst().run();
+        assertEquals(2, updates.get());
+        assertEquals(0, pending.size());
     }
 
     private static void supportsTraditionalChineseTargets() {
@@ -208,6 +306,12 @@ public final class CoreSelfTest {
         assertFalse(TranslationStatusLocalizer.isDownloadProgress("离线模型已就绪"));
         assertEquals("status.universal_translator.model_downloading_progress=[42%]",
                 TranslationStatusLocalizer.localize("正在下载离线模型：42%", translator));
+        TranslationStatusLocalizer.DownloadProgressDisplay progress =
+                TranslationStatusLocalizer.downloadProgressDisplay(
+                        "正在下载离线引擎：12.5%（5.0/40.0 MB）", translator);
+        assertEquals("status.universal_translator.engine_downloading_progress=[12.5%]",
+                progress.progress());
+        assertEquals("5.0/40.0 MB", progress.size());
     }
 
     private static void normalizesOfflineModelSelections() throws Exception {
@@ -225,7 +329,33 @@ public final class CoreSelfTest {
         try (LlamaCppOfflineProvider provider = LlamaCppOfflineProvider.forModel(
                 directory, false, "invalid-selection")) {
             assertEquals("offline-llama:" + OfflineModel.LITE.modelId()
-                    + ":compact-prompt-v1", provider.id());
+                    + ":direct-output-v4", provider.id());
+        }
+        try (LlamaCppOfflineProvider provider = LlamaCppOfflineProvider.forModel(
+                directory, false, OfflineModel.QUALITY)) {
+            assertEquals("offline-llama:" + OfflineModel.QUALITY.modelId()
+                    + ":direct-output-v3", provider.id());
+        }
+    }
+
+    private static void usesSharedOfflineStorageAcrossInstances() throws Exception {
+        Path shared = Files.createTempDirectory("ut-shared-offline-");
+        String property = "universaltranslator.offline.directory";
+        String previous = System.getProperty(property);
+        try {
+            System.setProperty(property, shared.toString());
+            assertEquals(shared.toAbsolutePath().normalize(),
+                    OfflineStoragePaths.sharedDirectory());
+            Path config = shared.resolve("launcher/instances/1.21/config");
+            assertTrue(OfflineStoragePaths.legacySearchRoots(config).contains(
+                    config.resolve("universal-translator-offline").toAbsolutePath().normalize()));
+        } finally {
+            if (previous == null) {
+                System.clearProperty(property);
+            } else {
+                System.setProperty(property, previous);
+            }
+            Files.deleteIfExists(shared);
         }
     }
 
@@ -484,7 +614,10 @@ public final class CoreSelfTest {
             assertEquals("\u4f60\u662f\u4ec0\u4e48\u6a21\u578b\uff1f\u8bf7\u544a\u8bc9\u6211\u3002", translated);
             assertEquals(2, calls.get());
             assertTrue(firstRequest.get().contains("\\\"source_text\\\""));
-            assertTrue(firstRequest.get().contains("\\\"numeric_reference\\\""));
+            assertFalse(firstRequest.get().contains("\\\"glossary_reference\\\""));
+            assertFalse(firstRequest.get().contains("\\\"context_reference\\\""));
+            assertFalse(firstRequest.get().contains("\\\"numeric_reference\\\""));
+            assertFalse(firstRequest.get().contains("For announcements"));
             assertTrue(firstRequest.get().contains("What model are you? Please tell me."));
         } finally {
             server.close();
@@ -536,6 +669,8 @@ public final class CoreSelfTest {
             assertEquals("找到__UT_0__个试炼", translated);
             assertTrue(requestBody.get().contains("numeric_token_reference"));
             assertTrue(requestBody.get().contains("role=count_or_measurement"));
+            assertFalse(requestBody.get().contains("What model are you?"));
+            assertFalse(requestBody.get().contains("你是什么模型"));
         } finally {
             server.close();
             serverThread.join(5000L);
@@ -545,6 +680,65 @@ public final class CoreSelfTest {
         }
         if (serverFailure.get() != null) {
             throw new AssertionError("Offline Lite API test server failed", serverFailure.get());
+        }
+    }
+
+    private static void rejectsQualityReferencePollution() throws Exception {
+        final ServerSocket server = new ServerSocket(0, 2,
+                InetAddress.getByName("127.0.0.1"));
+        final AtomicInteger calls = new AtomicInteger();
+        final AtomicReference<String> requestBody = new AtomicReference<String>();
+        final AtomicReference<Throwable> serverFailure = new AtomicReference<Throwable>();
+        Thread serverThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    for (int attempt = 0; attempt < 2; attempt++) {
+                        try (Socket socket = server.accept()) {
+                            requestBody.compareAndSet(null, readHttpBody(socket.getInputStream()));
+                            String content = calls.incrementAndGet() == 1
+                                    ? "\u63a7\u5236\u4e91 \u201cHub\u201d\u5e94\u7ffb\u8bd1\u4e3a\u201c\u5927\u5385\u201d\u3002"
+                                    : "\u63a7\u5236\u4e91\u5927\u5385";
+                            writeHttpResponse(socket, "{\"choices\":[{\"message\":{\"content\":"
+                                    + JsonStrings.quote(content) + "}}]}");
+                        }
+                    }
+                } catch (Throwable failure) {
+                    serverFailure.set(failure);
+                } finally {
+                    try {
+                        server.close();
+                    } catch (IOException ignored) {
+                        // 测试结束
+                    }
+                }
+            }
+        }, "offline-quality-reference-isolation-test");
+        serverThread.setDaemon(true);
+        serverThread.start();
+
+        try {
+            String model = OfflineModel.QUALITY.modelId();
+            OpenAiChatTranslationProvider provider = new OpenAiChatTranslationProvider(
+                    "http://127.0.0.1:" + server.getLocalPort(), "", model,
+                    "offline-loopback-test-" + model);
+            String translated = provider.translate(new TranslationRequest(
+                    "Control Cloud Hub", "auto", "zh-CN", TextKind.HOLOGRAM));
+            assertEquals("\u63a7\u5236\u4e91\u5927\u5385", translated);
+            assertEquals(2, calls.get());
+            assertFalse(requestBody.get().contains("bullet"));
+            assertFalse(requestBody.get().contains("\u5b50\u5f39"));
+            assertTrue(requestBody.get().contains("hub=\u5927\u5385"));
+            assertTrue(requestBody.get().contains("\"max_tokens\":50"));
+        } finally {
+            server.close();
+            serverThread.join(5000L);
+        }
+        if (serverThread.isAlive()) {
+            throw new AssertionError("Offline Quality API test server did not stop");
+        }
+        if (serverFailure.get() != null) {
+            throw new AssertionError("Offline Quality API test server failed", serverFailure.get());
         }
     }
 
@@ -677,6 +871,25 @@ public final class CoreSelfTest {
         }
     }
 
+    private static void translatesWrappedUiLinesAsOneSentence() throws Exception {
+        RecordingProvider provider = new RecordingProvider("用于渲染 质量等级");
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                provider, "auto", "zh-CN", 100, 1)) {
+            java.util.List<String> original = Arrays.asList(
+                    "The quality level", "used for rendering");
+            assertEquals(original, session.lookupWrappedLines(original, TextKind.TOOLTIP));
+            long deadline = System.currentTimeMillis() + 2000L;
+            java.util.List<String> translated;
+            do {
+                Thread.sleep(10L);
+                translated = session.lookupWrappedLines(original, TextKind.TOOLTIP);
+            } while (original.equals(translated) && System.currentTimeMillis() < deadline);
+            assertEquals("The quality level used for rendering", provider.lastRequest.get());
+            assertEquals(1, provider.calls.get());
+            assertEquals(Arrays.asList("用于渲染", "质量等级"), translated);
+        }
+    }
+
     private static void keepsScoreboardRowsIndependent() throws Exception {
         RecordingProvider provider = new RecordingProvider("\u73b0\u91d1");
         try (RenderTranslationSession session = new RenderTranslationSession(
@@ -805,6 +1018,20 @@ public final class CoreSelfTest {
             assertEquals(expectedSign, translatedSign);
             assertEquals("Storage", provider.lastRequest.get());
 
+            java.util.List<String> framedSign = Arrays.asList(
+                    "x-------x", "Start text", "x-------x", "");
+            java.util.List<String> expectedFramedSign = Arrays.asList(
+                    "x-------x", "译文", "x-------x", "");
+            java.util.List<String> translatedFramedSign;
+            deadline = System.currentTimeMillis() + 2000L;
+            do {
+                Thread.sleep(10L);
+                translatedFramedSign = session.lookupLines(framedSign, TextKind.SIGN);
+            } while (!expectedFramedSign.equals(translatedFramedSign)
+                    && System.currentTimeMillis() < deadline);
+            assertEquals(expectedFramedSign, translatedFramedSign);
+            assertEquals("Start text", provider.lastRequest.get());
+
             String book = "Intro\n------\nStorage";
             String expectedBook = "\u8bd1\u6587\n------\n\u8bd1\u6587";
             String translatedBook;
@@ -816,6 +1043,150 @@ public final class CoreSelfTest {
             assertEquals(expectedBook, translatedBook);
             assertFalse(provider.lastRequest.get().contains("------"));
         }
+        assertTrue(VisualTextBoundaries.isSeparatorLine("=========="));
+        assertTrue(VisualTextBoundaries.isSeparatorLine("＝＝＝＝"));
+        assertTrue(VisualTextBoundaries.isSeparatorLine("x-------x"));
+        assertTrue(VisualTextBoundaries.isSeparatorLine("你 -------- 你"));
+        assertFalse(VisualTextBoundaries.isSeparatorLine("Wheat ----------- 2$"));
+        assertEquals("已关闭",
+                VisualTextBoundaries.stripAttachedSeparatorRuns("已关闭=========="));
+        assertEquals("已关闭",
+                VisualTextBoundaries.stripAttachedSeparatorRuns("==== 已关闭 ===="));
+    }
+
+    private static void preservesVerticalSignGraphicLayout() throws Exception {
+        RecordingProvider provider = new RecordingProvider("开始");
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                provider, "auto", "zh-CN", 100, 1)) {
+            List<String> sign = Arrays.asList("Start", "I", "I", "V");
+            List<String> expected = Arrays.asList("开始", "I", "I", "V");
+            List<String> translated = sign;
+            long deadline = System.currentTimeMillis() + 2000L;
+            do {
+                Thread.sleep(10L);
+                translated = session.lookupLines(sign, TextKind.SIGN);
+            } while (!expected.equals(translated) && System.currentTimeMillis() < deadline);
+            assertEquals(expected, translated);
+            assertEquals("Start", provider.lastRequest.get());
+        }
+        assertTrue(VisualTextBoundaries.hasGraphicLayout(
+                Arrays.asList("Start", "I", "I", "V")));
+        assertTrue(VisualTextBoundaries.isGraphicLine("\u2193"));
+        assertFalse(VisualTextBoundaries.hasGraphicLayout(
+                Arrays.asList("Start", "I", "Welcome", "Down")));
+    }
+
+    private static void keepsSignModelRowAndLabelRowSeparate() throws Exception {
+        TranslationProvider provider = new TranslationProvider() {
+            @Override
+            public String id() {
+                return "sign-two-row-label-test";
+            }
+
+            @Override
+            public String translate(TranslationRequest request) {
+                if (request.getText().contains("Pumping")) {
+                    return request.getText().replace("Pumping system", "泵送系统");
+                }
+                return TranslationOutputValidator.requireValid(
+                        request.getText(), request.getText(), request.getTargetLanguage());
+            }
+        };
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                provider, "auto", "zh-CN", 100, 1)) {
+            List<String> sign = Arrays.asList("LCM PX-3600", "Pumping system", "", "");
+            List<String> expected = Arrays.asList("LCM PX-3600", "泵送系统", "", "");
+            List<String> translated = sign;
+            long deadline = System.currentTimeMillis() + 2000L;
+            do {
+                Thread.sleep(10L);
+                translated = session.lookupLines(sign, TextKind.SIGN);
+            } while (!expected.equals(translated) && System.currentTimeMillis() < deadline);
+            assertEquals(expected, translated);
+        }
+    }
+
+    private static void keepsSignSeparatorWithTrailingArrow() throws Exception {
+        // 单侧箭头分隔线也要当成布局锚点，避免整块被合并翻译后重新分行
+        assertTrue(VisualTextBoundaries.isSeparatorLine("------------------------------>"));
+        assertTrue(VisualTextBoundaries.isSeparatorLine("<------------------------------"));
+        assertFalse(VisualTextBoundaries.isSeparatorLine("Wheat ----------- 2$"));
+
+        TranslationProvider provider = new TranslationProvider() {
+            @Override
+            public String id() {
+                return "sign-arrow-separator-test";
+            }
+
+            @Override
+            public String translate(TranslationRequest request) {
+                if (request.getText().contains("RESERVOIR")) {
+                    return request.getText().replace("RESERVOIR", "水库");
+                }
+                return TranslationOutputValidator.requireValid(
+                        request.getText(), request.getText(), request.getTargetLanguage());
+            }
+        };
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                provider, "auto", "zh-CN", 100, 1)) {
+            List<String> sign = Arrays.asList(
+                    "RESERVOIR #1", "------------------------------>", "", "");
+            List<String> expected = Arrays.asList(
+                    "水库 #1", "------------------------------>", "", "");
+            List<String> translated = sign;
+            long deadline = System.currentTimeMillis() + 2000L;
+            do {
+                Thread.sleep(10L);
+                translated = session.lookupLines(sign, TextKind.SIGN);
+            } while (!expected.equals(translated) && System.currentTimeMillis() < deadline);
+            assertEquals(expected, translated);
+        }
+    }
+
+    private static void preservesDecorativeSignLayout() throws Exception {
+        final CopyOnWriteArrayList<String> requests = new CopyOnWriteArrayList<String>();
+        TranslationProvider provider = new TranslationProvider() {
+            @Override
+            public String id() {
+                return "decorative-sign-layout-test";
+            }
+
+            @Override
+            public String translate(TranslationRequest request) {
+                requests.add(request.getText());
+                return request.getText()
+                        .replace("BEGIN", "开始")
+                        .replace("GAME", "游戏")
+                        .replace("PLAY", "游玩");
+            }
+        };
+        List<String> original = Arrays.asList(
+                ">> BEGIN <<", "GAME", "《PLAY》", "》GAME《", "");
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                provider, "auto", "zh-CN", 100, 1)) {
+            List<String> translated = original;
+            long deadline = System.currentTimeMillis() + 2000L;
+            do {
+                Thread.sleep(10L);
+                translated = session.lookupLines(original, TextKind.SIGN);
+            } while (!Arrays.asList(">> 开始 <<", "游戏", "《游玩》", "》游戏《", "")
+                    .equals(translated)
+                    && System.currentTimeMillis() < deadline);
+            assertEquals(Arrays.asList(">> 开始 <<", "游戏", "《游玩》", "》游戏《", ""),
+                    translated);
+        }
+        assertTrue(VisualTextBoundaries.hasDecorativeLayout(original));
+        boolean sawProtectedMarkers = false;
+        for (String request : requests) {
+            assertFalse(request.contains(">>"));
+            assertFalse(request.contains("<<"));
+            assertFalse(request.contains("《"));
+            assertFalse(request.contains("》"));
+            if (request.contains("__UT_")) {
+                sawProtectedMarkers = true;
+            }
+        }
+        assertTrue(sawProtectedMarkers);
     }
 
     private static void preservesSignTokenPunctuation() throws Exception {
@@ -1161,6 +1532,16 @@ public final class CoreSelfTest {
         assertEquals(Float.valueOf(0.5F), Float.valueOf(HologramTopAnchor.offset(3, 1)));
     }
 
+    private static void centersOnlyShortHologramPhrases() {
+        assertTrue(HologramTextAlignment.shouldCenter("Closed", "已关闭"));
+        assertTrue(HologramTextAlignment.shouldCenter("Select difficulty", "选择难度"));
+        assertFalse(HologramTextAlignment.shouldCenter(
+                "Long notice",
+                "这是一段需要保留原始排版并继续按照原有宽度换行显示的较长公告文本"));
+        assertFalse(HologramTextAlignment.shouldCenter(
+                "Server is restarting.", "服务器正在重启。"));
+    }
+
     private static void preservesCompleteHologramDateOrder() throws Exception {
         final AtomicReference<String> lastRequest = new AtomicReference<String>();
         TranslationProvider provider = new TranslationProvider() {
@@ -1424,6 +1805,15 @@ public final class CoreSelfTest {
         assertEquals("[Option]", textureSegments.get(1));
         assertEquals("After", textureSegments.get(2));
 
+        assertEquals(Arrays.asList("《GAME》"),
+                VisualTextBoundaries.splitBracketSegments("《GAME》"));
+        assertEquals(Arrays.asList("》GAME《"),
+                VisualTextBoundaries.splitBracketSegments("》GAME《"));
+        assertEquals(Arrays.asList(">> GAME <<"),
+                VisualTextBoundaries.splitBracketSegments(">> GAME <<"));
+        assertEquals(Arrays.asList("[GAME]"),
+                VisualTextBoundaries.splitBracketSegments("[GAME]"));
+
         RecordingProvider provider = new RecordingProvider("\u524d\u7f00\u3010\u9009\u9879\u3011\u5c3e\u90e8");
         try (RenderTranslationSession session = new RenderTranslationSession(
                 provider, "auto", "zh-CN", 100, 1)) {
@@ -1451,6 +1841,39 @@ public final class CoreSelfTest {
             index += value.length();
         }
         return count;
+    }
+
+    private static void tracksMovingPlayerHologramsWithLag() {
+        PlayerFollowHologramTracker tracker = new PlayerFollowHologramTracker(8);
+        long followingKey = 1L;
+        assertTrue(!tracker.observe(
+                followingKey, 7, true,
+                0.0D, 2.2D, 0.0D,
+                0.0D, 0.0D, 0.0D).following());
+        assertTrue(!tracker.observe(
+                followingKey, 7, true,
+                0.0D, 2.2D, 0.0D,
+                0.1D, 0.0D, 0.0D).following());
+        assertTrue(tracker.observe(
+                followingKey, 7, true,
+                0.1D, 2.2D, 0.0D,
+                0.2D, 0.0D, 0.0D).following());
+        assertEquals(Integer.valueOf(7), tracker.confirmedPlayerId(followingKey));
+        assertTrue(tracker.miss(followingKey).following());
+
+        long fixedKey = 2L;
+        tracker.observe(
+                fixedKey, 7, true,
+                0.0D, 2.2D, 0.0D,
+                0.0D, 0.0D, 0.0D);
+        tracker.observe(
+                fixedKey, 7, true,
+                0.0D, 2.2D, 0.0D,
+                0.1D, 0.0D, 0.0D);
+        assertTrue(!tracker.observe(
+                fixedKey, 7, true,
+                0.0D, 2.2D, 0.0D,
+                0.2D, 0.0D, 0.0D).following());
     }
 
     private static String waitForCompleteLookup(
@@ -1882,7 +2305,8 @@ public final class CoreSelfTest {
     private static void cacheHitsRenderImmediatelyAfterRestart() throws Exception {
         Path directory = Files.createTempDirectory("universal-translator-render-cache-");
         Path file = directory.resolve("cache.properties");
-        CountingProvider firstProvider = new CountingProvider(false);
+        CountingProvider firstProvider =
+                new CountingProvider("deepseek:deepseek-chat", false);
         try (RenderTranslationSession session = new RenderTranslationSession(
                 firstProvider, "auto", "zh-CN", new PersistentTranslationCache(file, 100), 1)) {
             session.lookup("Coins: 42", TextKind.TITLE);
@@ -1896,11 +2320,38 @@ public final class CoreSelfTest {
             assertEquals(1, firstProvider.calls.get());
         }
 
-        CountingProvider secondProvider = new CountingProvider(false);
+        CountingProvider secondProvider =
+                new CountingProvider("kimi:moonshot-v1-8k", false);
         try (RenderTranslationSession session = new RenderTranslationSession(
                 secondProvider, "auto", "zh-CN", new PersistentTranslationCache(file, 100), 1)) {
             assertEquals("金币: 42", session.lookup("Coins: 42", TextKind.TITLE));
             assertEquals(0, secondProvider.calls.get());
+        }
+    }
+
+    private static void migratesProviderScopedCacheAfterModelSwitch() throws Exception {
+        Path directory = Files.createTempDirectory(
+                "universal-translator-provider-cache-migration-");
+        Path file = directory.resolve("cache.properties");
+        PersistentTranslationCache oldCache =
+                new PersistentTranslationCache(file, 100);
+        String formatVersion = "translation-v13-" + GameTranslationHints.VERSION;
+        String source = "Legacy cached title";
+        String identity = "auto\nzh-CN\n" + source;
+        String oldProvider = "deepseek:deepseek-chat";
+        oldCache.put(
+                formatVersion + "\n" + oldProvider + "\n" + identity,
+                "旧缓存标题");
+
+        RecordingProvider replacement =
+                new RecordingProvider("不应调用新模型", "kimi:moonshot-v1-8k");
+        PersistentTranslationCache reopened =
+                new PersistentTranslationCache(file, 100);
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                replacement, "auto", "zh-CN", reopened, 1)) {
+            assertEquals("旧缓存标题", session.lookup(source, TextKind.TITLE));
+            assertEquals(0, replacement.calls.get());
+            assertEquals("旧缓存标题", reopened.get(formatVersion + "\n" + identity));
         }
     }
 
@@ -1909,7 +2360,8 @@ public final class CoreSelfTest {
         Path file = directory.resolve("cache.properties");
         String source = "Your attack cooldown will not reset when you miss or switch weapons";
         String translated = "你的攻击冷却在你打空或切换武器时不会重置";
-        RecordingProvider firstProvider = new RecordingProvider(translated);
+        RecordingProvider firstProvider =
+                new RecordingProvider(translated, "offline-llama:lite:direct-output-v4");
         try (RenderTranslationSession session = new RenderTranslationSession(
                 firstProvider, "auto", "zh-CN", new PersistentTranslationCache(file, 100), 1)) {
             session.setProtectedLiteralsSupplier(() ->
@@ -1918,12 +2370,45 @@ public final class CoreSelfTest {
             assertEquals(1, firstProvider.calls.get());
         }
 
-        RecordingProvider secondProvider = new RecordingProvider(translated);
+        RecordingProvider secondProvider =
+                new RecordingProvider(translated, "kimi:moonshot-v1-8k");
         try (RenderTranslationSession session = new RenderTranslationSession(
                 secondProvider, "auto", "zh-CN", new PersistentTranslationCache(file, 100), 1)) {
             session.setProtectedLiteralsSupplier(() ->
                     ProtectedLiteralsSnapshot.of(Arrays.asList("Steve_42")));
             assertEquals(translated, session.lookupComplete(source, TextKind.HOLOGRAM));
+            assertEquals(0, secondProvider.calls.get());
+        }
+    }
+
+    private static void reusesCachedUiTextAcrossKinds() throws Exception {
+        Path directory = Files.createTempDirectory("universal-translator-ui-cache-");
+        Path file = directory.resolve("cache.properties");
+        String source = "Ancient Blade";
+        String translated = "远古之刃";
+        RecordingProvider firstProvider =
+                new RecordingProvider(translated, "deepseek:deepseek-chat");
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                firstProvider, "auto", "zh-CN",
+                new PersistentTranslationCache(file, 100), 1)) {
+            session.setProtectedLiteralsSupplier(() ->
+                    ProtectedLiteralsSnapshot.of(Arrays.asList("Steve_42")));
+            assertEquals(translated, waitForLookup(session, source, TextKind.ITEM_LORE));
+            assertEquals(1, firstProvider.calls.get());
+        }
+
+        RecordingProvider secondProvider =
+                new RecordingProvider(translated, "offline-llama:quality:direct-output-v3");
+        try (RenderTranslationSession session = new RenderTranslationSession(
+                secondProvider, "auto", "zh-CN",
+                new PersistentTranslationCache(file, 100), 1)) {
+            session.setProtectedLiteralsSupplier(() ->
+                    ProtectedLiteralsSnapshot.of(Arrays.asList("Steve_42")));
+            assertEquals(translated, session.lookup(source, TextKind.ITEM_NAME));
+            assertEquals(translated, session.lookup(source, TextKind.TOOLTIP));
+            assertEquals(translated, session.translateInteractive(
+                    source, TextKind.ACTION_BAR, "zh-CN", true).get(
+                    1L, TimeUnit.SECONDS).getTranslatedText());
             assertEquals(0, secondProvider.calls.get());
         }
     }
@@ -2008,6 +2493,9 @@ public final class CoreSelfTest {
         assertEquals(2, imported.importFrom(exported));
         assertEquals("第一条译文", imported.get("cache-key-one"));
         assertEquals("Second translated text", imported.get("cache-key-two"));
+        PersistentTranslationCache reopened = new PersistentTranslationCache(importedFile, 10);
+        assertEquals("第一条译文", reopened.get("cache-key-one"));
+        assertEquals("Second translated text", reopened.get("cache-key-two"));
 
         TranslationCache memory = new TranslationCache(10);
         assertEquals(2, memory.importFrom(exported));
@@ -2496,14 +2984,28 @@ public final class CoreSelfTest {
                     "Magic wand", "auto", "zh-CN", TextKind.ITEM_LORE)
                     .get(2, TimeUnit.SECONDS);
             assertEquals("\u9b54\u6756", first.getTranslatedText());
-            assertTrue(provider.lastGlossary.get().contains("bullet=\u5b50\u5f39"));
+            assertEquals("", provider.lastGlossary.get());
 
             TranslationResult second = coordinator.translate(
                     "Open menu", "auto", "zh-CN", TextKind.ITEM_LORE)
                     .get(2, TimeUnit.SECONDS);
             assertEquals("\u6253\u5f00\u83dc\u5355", second.getTranslatedText());
+            assertEquals("", provider.lastContext.get());
+
+            TranslationResult related = coordinator.translate(
+                    "Magic wand menu", "auto", "zh-CN", TextKind.ITEM_LORE)
+                    .get(2, TimeUnit.SECONDS);
+            assertEquals("\u9b54\u6756\u83dc\u5355", related.getTranslatedText());
             assertTrue(provider.lastContext.get().contains("Magic wand=>\u9b54\u6756"));
         }
+        TranslationRequest unrelated = new TranslationRequest(
+                "hi", "auto", "zh-CN", TextKind.CHAT);
+        assertEquals("", unrelated.getGlossaryHint());
+        TranslationRequest related = new TranslationRequest(
+                "Reload the bullet", "auto", "zh-CN", TextKind.ITEM_LORE);
+        assertTrue(related.getGlossaryHint().contains("bullet=\u5b50\u5f39"));
+        assertTrue(related.getGlossaryHint().contains("reload=\u88c5\u586b"));
+        assertFalse(related.getGlossaryHint().contains("gun=\u67aa\u68b0"));
     }
 
     private static void prefersChinaDownloadSources() {
@@ -2533,6 +3035,15 @@ public final class CoreSelfTest {
         ProcessBuilder builder = new ProcessBuilder();
         assertEquals("model.gguf", OfflineProcessSupport.useRelativeModelPath(builder, model));
         assertEquals(directory.toFile(), builder.directory());
+    }
+
+    private static void recognizesOfflineLoopbackFailures() {
+        assertTrue(OfflineProcessSupport.isLoopbackConnectionFailure(
+                new IOException("Connection refused: getsockopt")));
+        assertTrue(OfflineProcessSupport.isLoopbackConnectionFailure(
+                new IOException("wrapped", new java.net.ConnectException("Connection refused"))));
+        assertFalse(OfflineProcessSupport.isLoopbackConnectionFailure(
+                new IOException("Translation service returned HTTP 500")));
     }
 
     private static void reportsOfflineStartupDiagnostics() throws Exception {
@@ -2608,6 +3119,36 @@ public final class CoreSelfTest {
         }
     }
 
+    private static void normalizesStatusEffectLevels() throws Exception {
+        final AtomicReference<String> numericHint = new AtomicReference<String>();
+        TranslationProvider provider = new TranslationProvider() {
+            @Override
+            public String id() {
+                return "status-effect-level-test";
+            }
+
+            @Override
+            public String translate(TranslationRequest request) {
+                numericHint.set(request.getNumericHint());
+                return "获得漂浮__UT_0__个效果";
+            }
+        };
+        try (TranslationCoordinator coordinator = new TranslationCoordinator(
+                provider, new TranslationCache(20), 1)) {
+            TranslationResult result = coordinator.translate(
+                    "Gain Levitation 3 effect",
+                    "auto", "zh-CN", TextKind.CHAT).get(2, TimeUnit.SECONDS);
+            assertEquals("获得漂浮3级效果", result.getTranslatedText());
+            assertTrue(numericHint.get().contains("role=status_effect_level"));
+            assertFalse(numericHint.get().contains("role=count_or_measurement"));
+        }
+        assertEquals("接触时获得漂浮3级效果",
+                LocalizedNumericGrammar.normalize(
+                        "Gain Levitation 3 effect on contact",
+                        "接触时获得漂浮3个效果",
+                        "zh-CN"));
+    }
+
     private static void repairsCachedStyledNumericGrammar() {
         String source = "{UT_STYLE_0_START}Dans ce monde, tu trouveras 6 épreuves "
                 + "différentes, pour finir à 100% cette map !{UT_STYLE_0_END}";
@@ -2638,6 +3179,15 @@ public final class CoreSelfTest {
         assertTrue(LanguageHeuristics.shouldTranslate("欢迎 VIP", "zh-CN"));
     }
 
+    private static void normalizesAllCapsSourceText() {
+        // 全大写改写后重试，避免模型原样返回
+        assertEquals("Welcome to the server",
+                LanguageHeuristics.normalizeAllCaps("WELCOME TO THE SERVER"));
+        assertEquals("Hello", LanguageHeuristics.normalizeAllCaps("HELLO"));
+        assertEquals(null, LanguageHeuristics.normalizeAllCaps("Already Normal"));
+        assertEquals(null, LanguageHeuristics.normalizeAllCaps("1234"));
+    }
+
     private static void protectsExistingChineseInMixedText() throws Exception {
         ProtectedText protectedText = ProtectedText.parse(
                 "Welcome 欢迎 VIP 服务器", java.util.Collections.<String>emptyList(), true);
@@ -2657,6 +3207,10 @@ public final class CoreSelfTest {
     }
 
     private static void stylesCompletedTranslations() {
+        assertEquals(TranslationTextColor.ORIGINAL, TranslationTextColor.fromConfig(null));
+        assertEquals(TranslationTextColor.ORIGINAL, TranslationTextColor.fromConfig("  "));
+        assertEquals(TranslationTextColor.AQUA, TranslationTextColor.fromConfig(" AQUA "));
+        assertEquals(TranslationTextColor.ORIGINAL, TranslationTextColor.fromConfig("original"));
         String styled = TranslationTextStyling.applyLegacyColor(
                 "\u00a7aCoins \u00a7r42", TranslationTextColor.AQUA);
         assertEquals("\u00a7bCoins \u00a7r\u00a7b42\u00a7r", styled);
@@ -2700,6 +3254,25 @@ public final class CoreSelfTest {
         assertEquals("你是什么模型？请告诉我。", TranslationOutputValidator.requireValid(
                 "What model are you? Please tell me.", "你是什么模型？请告诉我。"));
         assertThrows(() -> TranslationOutputValidator.requireValid(
+                "Automatic translation tool: waiting for offline translation",
+                "你是什么模型？自动翻译工具：等待首次离线翻译", "zh-CN"));
+        assertThrows(() -> TranslationOutputValidator.requireValid(
+                "Control Cloud Hub", "控制云 \u201cHub\u201d应翻译为\u201c大厅\u201d。", "zh-CN"));
+        assertThrows(() -> TranslationOutputValidator.requireValid(
+                "Control Cloud Hub", "控制云 Hub 应 翻译 为大厅", "zh-CN"));
+        assertThrows(() -> TranslationOutputValidator.requireValid(
+                "Control Cloud Hub", "<think>先分析词义</think>控制云大厅", "zh-CN"));
+        assertThrows(() -> TranslationOutputValidator.requireValid(
+                "Control Cloud Hub", "<think>先分析词义 控制云大厅", "zh-CN"));
+        assertEquals("这个词应翻译为大厅", TranslationOutputValidator.requireValid(
+                "This word should be translated as Hub", "这个词应翻译为大厅", "zh-CN"));
+        assertThrows(() -> TranslationOutputValidator.requireValid(
+                "Welcome", "译文：欢迎", "zh-CN"));
+        assertThrows(() -> TranslationOutputValidator.requireDisplaySafe(
+                "Control Cloud Hub", "控制云 Hub 可译为大厅"));
+        assertThrows(() -> TranslationOutputValidator.requireDisplaySafe(
+                "Welcome to the server", "你是什么模型？欢迎来到服务器"));
+        assertThrows(() -> TranslationOutputValidator.requireValid(
                 "Or download it by clicking", "Or download it by clicking", "zh-CN"));
         assertThrows(() -> TranslationOutputValidator.requireValid(
                 "Enable the resource pack", "Enable the redstone bullet.", "zh-CN"));
@@ -2723,6 +3296,8 @@ public final class CoreSelfTest {
                 "And.", "zh-CN"));
         assertEquals("\u8b66\u544a:", GameTranslationHints.exactTranslation(
                 "WARNING:", "zh-CN"));
+        assertEquals("\u5927\u5385", GameTranslationHints.exactTranslation(
+                "Hub", "zh-CN"));
         assertEquals("AIaA\u8bbe\u65bd.", GameTranslationHints.localTranslation(
                 "AIaA facility.", "zh-CN"));
         assertEquals("\u5df2\u83b7\u53d6 VHS", GameTranslationHints.localTranslation(
@@ -2827,6 +3402,37 @@ public final class CoreSelfTest {
         }
     }
 
+    private static void retriesAllCapsAfterStructuredRejection() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        TranslationProvider provider = new TranslationProvider() {
+            @Override
+            public String id() {
+                return "allcaps-fallback-test";
+            }
+
+            @Override
+            public String translate(TranslationRequest request) {
+                calls.incrementAndGet();
+                if (request.getText().contains("Server notice")) {
+                    return request.getText().replace("Server notice", "\u670d\u52a1\u5668\u901a\u77e5");
+                }
+                return TranslationOutputValidator.requireValid(
+                        request.getText(), request.getText(), request.getTargetLanguage());
+            }
+        };
+        try (TranslationCoordinator coordinator = new TranslationCoordinator(
+                provider, new TranslationCache(100), 1)) {
+            // 含数字的全大写文本先走结构化路径，被拒后应回退分段并改写重试
+            TranslationResult result = coordinator.translate(
+                    "SERVER NOTICE 1", "auto", "zh-CN", TextKind.SIGN)
+                    .get(2, TimeUnit.SECONDS);
+            assertTrue(result.isTranslated());
+            assertFalse(result.isFailure());
+            assertEquals("\u670d\u52a1\u5668\u901a\u77e5 1", result.getTranslatedText());
+            assertTrue(calls.get() >= 4);
+        }
+    }
+
     private static void preservesRecentUserMessages() {
         RecentUserText recent = new RecentUserText();
         recent.remember("hello world");
@@ -2881,6 +3487,20 @@ public final class CoreSelfTest {
                     coordinator.translate("Players online", "auto", "zh-CN", TextKind.PLAYER_LIST_HEADER);
             first.get(2, TimeUnit.SECONDS);
             second.get(2, TimeUnit.SECONDS);
+            assertEquals(1, provider.calls.get());
+        }
+    }
+
+    private static void reusesCacheAcrossConcurrentTextKinds() throws Exception {
+        CountingProvider provider = new CountingProvider(false);
+        try (TranslationCoordinator coordinator = new TranslationCoordinator(
+                provider, new TranslationCache(100), 1)) {
+            java.util.concurrent.CompletableFuture<TranslationResult> first =
+                    coordinator.translate("Players online", "auto", "zh-CN", TextKind.ITEM_NAME);
+            java.util.concurrent.CompletableFuture<TranslationResult> second =
+                    coordinator.translate("Players online", "auto", "zh-CN", TextKind.TOOLTIP);
+            assertEquals("\u5728\u7ebf\u73a9\u5bb6", first.get(2, TimeUnit.SECONDS).getTranslatedText());
+            assertEquals("\u5728\u7ebf\u73a9\u5bb6", second.get(2, TimeUnit.SECONDS).getTranslatedText());
             assertEquals(1, provider.calls.get());
         }
     }
@@ -2990,15 +3610,21 @@ public final class CoreSelfTest {
     private static final class CountingProvider implements TranslationProvider {
         private final AtomicInteger calls = new AtomicInteger();
         private final AtomicReference<String> lastRequest = new AtomicReference<String>();
+        private final String providerId;
         private final boolean fail;
 
         private CountingProvider(boolean fail) {
+            this("test", fail);
+        }
+
+        private CountingProvider(String providerId, boolean fail) {
+            this.providerId = providerId;
             this.fail = fail;
         }
 
         @Override
         public String id() {
-            return "test";
+            return providerId;
         }
 
         @Override
@@ -3051,18 +3677,24 @@ public final class CoreSelfTest {
         private final AtomicInteger calls = new AtomicInteger();
         private final AtomicReference<String> lastRequest = new AtomicReference<String>();
         private final String fixedResponse;
+        private final String providerId;
 
         private RecordingProvider() {
-            this(null);
+            this(null, "recording-test");
         }
 
         private RecordingProvider(String fixedResponse) {
+            this(fixedResponse, "recording-test");
+        }
+
+        private RecordingProvider(String fixedResponse, String providerId) {
             this.fixedResponse = fixedResponse;
+            this.providerId = providerId;
         }
 
         @Override
         public String id() {
-            return "recording-test";
+            return providerId;
         }
 
         @Override
@@ -3118,6 +3750,9 @@ public final class CoreSelfTest {
             }
             if ("Open menu".equals(request.getText())) {
                 return "\u6253\u5f00\u83dc\u5355";
+            }
+            if ("Magic wand menu".equals(request.getText())) {
+                return "\u9b54\u6756\u83dc\u5355";
             }
             return request.getText();
         }

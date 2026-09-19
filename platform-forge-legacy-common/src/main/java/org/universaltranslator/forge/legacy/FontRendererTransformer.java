@@ -14,6 +14,9 @@ public final class FontRendererTransformer implements IClassTransformer {
     private static final String GUI_SCREEN = "net.minecraft.client.gui.GuiScreen";
     private static final String GUI_TEXT_FIELD = "net.minecraft.client.gui.GuiTextField";
     private static final String GUI_EDIT_SIGN = "net.minecraft.client.gui.inventory.GuiEditSign";
+    private static final String GUI_INGAME = "net.minecraft.client.gui.GuiIngame";
+    private static final String SIGN_RENDERER =
+            "net.minecraft.client.renderer.tileentity.TileEntitySignRenderer";
     private static final String BRIDGE =
             "org/universaltranslator/forge/legacy/LegacyRenderedTextBridge";
     private static final String VERSION_ACCESS =
@@ -29,28 +32,38 @@ public final class FontRendererTransformer implements IClassTransformer {
         boolean guiScreen = GUI_SCREEN.equals(name) || GUI_SCREEN.equals(transformedName);
         boolean guiTextField = GUI_TEXT_FIELD.equals(name) || GUI_TEXT_FIELD.equals(transformedName);
         boolean guiEditSign = GUI_EDIT_SIGN.equals(name) || GUI_EDIT_SIGN.equals(transformedName);
-        if (!fontRenderer && !chatHud && !guiScreen && !guiTextField && !guiEditSign) {
+        boolean guiIngame = GUI_INGAME.equals(name) || GUI_INGAME.equals(transformedName);
+        boolean signRenderer = SIGN_RENDERER.equals(name) || SIGN_RENDERER.equals(transformedName);
+        if (!fontRenderer && !chatHud && !guiScreen && !guiTextField
+                && !guiEditSign && !guiIngame && !signRenderer) {
             return basicClass;
         }
         try {
             ClassReader reader = new ClassReader(basicClass);
             ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
-            CountingVisitor visitor = fontRenderer
+            ClassVisitor visitor = fontRenderer
                     ? new FontRendererVisitor(writer)
                     : chatHud ? new ChatHudVisitor(writer)
                     : guiScreen ? new TooltipVisitor(writer)
-                    : guiTextField ? new TextInputVisitor(writer) : new SignInputVisitor(writer);
+                    : guiTextField ? new TextInputVisitor(writer)
+                    : guiEditSign ? new SignInputVisitor(writer)
+                    : new LegacyPlatformClassVisitor(writer, guiIngame);
             reader.accept(visitor, 0);
+            int modifiedMethods = visitor instanceof CountingVisitor
+                    ? ((CountingVisitor) visitor).modifiedMethods()
+                    : ((LegacyPlatformClassVisitor) visitor).modifiedMethods();
             String hookName = fontRenderer ? "font rendering"
                     : chatHud ? "chat context"
                     : guiScreen ? "tooltip context"
-                    : guiTextField ? "text input context" : "sign input context";
-            if (visitor.modifiedMethods() == 0) {
+                    : guiTextField ? "text input context"
+                    : guiEditSign ? "sign input context"
+                    : guiIngame ? "urgent HUD context" : "sign render context";
+            if (modifiedMethods == 0) {
                 System.err.println("[MC Auto Translation Tool] No compatible " + hookName
                         + " methods were found; text translation hook is inactive");
                 return basicClass;
             }
-            System.out.println("[MC Auto Translation Tool] Installed " + visitor.modifiedMethods()
+            System.out.println("[MC Auto Translation Tool] Installed " + modifiedMethods
                     + " " + hookName + " hook(s)");
             return writer.toByteArray();
         } catch (Throwable error) {

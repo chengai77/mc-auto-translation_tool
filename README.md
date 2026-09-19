@@ -5,7 +5,7 @@
 一个面向 Minecraft Java 版的公益、开源、纯客户端全界面翻译模组。
 
 [⬇️ 下载最新版](https://github.com/chengai77/mc-auto-translation_tool/releases) ·
-[🌐 官方下载页](https://mc-auto-translation-tool.wuxiangdan96.chatgpt.site/#download) ·
+[🌐 官方下载页](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases) ·
 [📚 文档中心](docs/README.md) · [📖 安装与使用说明](docs/Zh-cn/USER_GUIDE.md)
 
 原作者：[B站「我小张7272635」](https://space.bilibili.com/3546631091783712)。
@@ -22,9 +22,10 @@ Action Bar、标题、Boss Bar、容器标题、物品名称与 Lore、告示牌
 
 | Minecraft | 加载器 | 下载 |
 | --- | --- | --- |
-| 1.8.9 | Forge | [下载 JAR](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/MCAutoTranslationTool-1.1-mc1.8.9-forge.jar) |
-| 1.12.2 | Forge | [下载 JAR](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/MCAutoTranslationTool-1.1-mc1.12.2-forge.jar) |
-| 1.21.11 | Fabric | [下载 JAR](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/MCAutoTranslationTool-1.1-mc1.21.11-fabric.jar) |
+| 1.8.9 | Forge | [下载 JAR](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v2026-08-25/mc-auto-translation-tool-forge-1.8.9-1.1.jar) |
+| 1.12.2 | Forge | [下载 JAR](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v2026-08-25/mc-auto-translation-tool-forge-1.12.2-1.1.jar) |
+| 1.21.11 | Fabric | [下载 JAR](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v2026-08-25/mc-auto-translation-tool-fabric-1.21.11-1.1.jar) |
+| 1.21.10 | Fabric | 开发适配，暂未发布 JAR |
 
 Minecraft 26.1 Fabric 的源码适配已合入并通过构建与主菜单启动检查，但当前尚未发布
 可下载 JAR。请勿把 1.21.11 文件用于 26.1。
@@ -48,16 +49,22 @@ Minecraft 26.1 Fabric 的源码适配已合入并通过构建与主菜单启动�
 
 | Minecraft | 加载器 | Java |
 | --- | --- | --- |
-| 26.2（开发中） | Fabric | 25 |
+| 26.3 | Fabric | 25 |
+| 26.2 | Fabric | 25 |
 | 26.1 | Fabric | 25 |
 | 1.21.11 | Fabric | 21 |
+| 1.21.10 | Fabric | 21 |
+| 1.18.1 | Fabric | 17 |
+| 1.17.1 | Fabric | 16 |
+| 1.16.5 | Fabric | 8 |
 | 1.12.2 | Forge | 8 |
 | 1.8.9 | Forge | 8 |
 
 不同游戏版本会生成不同 JAR，但共享相同的核心逻辑和配置语义。
 
-主分支另包含 Fabric 26.1 与 26.2 开发适配，均使用 Java 25。26.2 已完成干净构建、
-重混淆及共享核心自测；在实机启动和服务器内回归完成前，不列入上方正式版下载。
+主分支另包含 Fabric 1.16.5、1.17.1、1.18.1、1.21.10、26.1、26.2 与 26.3 开发适配；1.16.5 使用 Java 8，1.17.1 使用 Java 16，1.18.1 使用 Java 17，1.21.10 使用 Java 21，26.x 使用 Java 25。
+1.16.5、1.17.1、1.18.1 与 1.21.10 只提供 Fabric 端，且受该版本 API 限制不提供全息文本（TextDisplay）翻译。
+26.2 与 26.3 已完成干净构建、重混淆及共享核心自测；在实机启动和服务器内回归完成前，不列入上方正式版下载。
 
 ## 当前状态
 
@@ -88,7 +95,7 @@ Minecraft 26.1 Fabric 的源码适配已合入并通过构建与主菜单启动�
 - 缓存译文并合并同时发生的相同请求。
 - 对已经是目标语言或只有数字的内容跳过联网。
 - 中英文混合文本只翻译英文片段，已有中文保持不变。
-- 译文可以使用青色、绿色、金色等独立颜色，也可保留原色。
+- 译文默认保留原色，也可选用青色、绿色、金色等独立颜色。
 - 翻译服务异常时返回原文。
 - 后台翻译不会阻塞渲染线程。
 - 设置保存后无需重启游戏即可应用。

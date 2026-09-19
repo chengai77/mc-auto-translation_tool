@@ -2,6 +2,7 @@ package org.universaltranslator.fabric;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import org.universaltranslator.core.CoalescingUpdateQueue;
 import org.universaltranslator.core.RenderTranslationSession;
 import org.universaltranslator.core.PersistentTranslationCache;
 import org.universaltranslator.core.ProtectedLiteralsSnapshot;
@@ -16,7 +17,11 @@ import org.universaltranslator.core.TranslationStore;
 import org.universaltranslator.core.TranslationTextColor;
 import org.universaltranslator.core.TranslationDisplayText;
 import org.universaltranslator.core.RecentUserText;
+import org.universaltranslator.core.RepeatingDisplayCache;
 import org.universaltranslator.core.StyledTranslationTemplate;
+import org.universaltranslator.core.provider.LlamaCppOfflineProvider;
+import org.universaltranslator.core.OrderedDisplayQueue;
+import org.universaltranslator.fabric.mixin.ChatComponentAccessor;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -24,6 +29,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class FabricTranslationRuntime {
     private static final long PLAYER_NAME_SNAPSHOT_MILLIS = 5_000L;
@@ -42,6 +48,14 @@ final class FabricTranslationRuntime {
     private static volatile long protectedPlayerNamesExpireAt;
     private static final RecentUserText RECENT_USER_TEXT = new RecentUserText();
     private static boolean replayingUrgentHudText;
+    private static final ConcurrentHashMap<TextKind, OrderedDisplayQueue<UrgentHudOutput>> URGENT_HUD_QUEUES =
+            new ConcurrentHashMap<TextKind, OrderedDisplayQueue<UrgentHudOutput>>();
+    private static final RepeatingDisplayCache<UrgentHudOutput> URGENT_HUD_REPEATS =
+            new RepeatingDisplayCache<UrgentHudOutput>(64);
+    private static final CoalescingUpdateQueue CHAT_REFRESH_QUEUE =
+            new CoalescingUpdateQueue(
+                    command -> Minecraft.getInstance().execute(command),
+                    FabricTranslationRuntime::refreshChat);
     private static CompletableFuture<Void> outgoingTail = CompletableFuture.completedFuture(null);
 
     private FabricTranslationRuntime() {
@@ -65,9 +79,31 @@ final class FabricTranslationRuntime {
             if (kind != TextKind.CHAT && kind != TextKind.SYSTEM_MESSAGE) {
                 return;
             }
-            Minecraft.getInstance().execute(() -> Minecraft.getInstance().gui.getChat().rescaleChat());
+            if (session == created) {
+                CHAT_REFRESH_QUEUE.request();
+            }
         });
         session = created;
+        CHAT_REFRESH_QUEUE.request();
+    }
+
+    private static void refreshChat() {
+        Minecraft client = Minecraft.getInstance();
+        if (client.gui != null) {
+            net.minecraft.client.gui.components.ChatComponent chat = client.gui.getChat();
+            ChatComponentAccessor stateAccess = (ChatComponentAccessor) chat;
+            int oldLines = stateAccess.universalTranslator$getTrimmedMessages().size();
+            int oldScroll = stateAccess.universalTranslator$getScroll();
+            boolean unread = stateAccess.universalTranslator$getUnread();
+            net.minecraft.client.gui.components.ChatComponent.State state = chat.storeState();
+            chat.rescaleChat();
+            chat.restoreState(state);
+            int newLines = stateAccess.universalTranslator$getTrimmedMessages().size();
+            int restoredScroll = oldScroll <= 0
+                    ? 0 : Math.max(0, oldScroll + newLines - oldLines);
+            stateAccess.universalTranslator$setScroll(restoredScroll);
+            stateAccess.universalTranslator$setUnread(unread);
+        }
     }
 
     static FabricConfig currentConfig() {
@@ -116,7 +152,7 @@ final class FabricTranslationRuntime {
                 || client.screen instanceof UniversalTranslatorLlmConfigScreen
                 || client.screen instanceof TranslationLogScreen
                 || client.screen instanceof TranslationLogSourceScreen
-                || FabricLocalTextGuard.isLocalChatInput(client, guardText)
+                || FabricLocalTextGuard.isLocalInput(client, guardText)
                 || RECENT_USER_TEXT.shouldPreserve(guardText)
                 || client.level == null || client.getConnection() == null) {
             return original;
@@ -157,7 +193,7 @@ final class FabricTranslationRuntime {
         return displayTranslatedOnly(active.lookup(original.trim(), effectiveKind));
     }
 
-    static void preloadUrgentHudText(Component text, TextKind kind, boolean overlayTinted) {
+    static boolean preloadUrgentHudText(Component text, TextKind kind, boolean overlayTinted) {
         RenderTranslationSession active = session;
         FabricConfig config = activeConfig;
         Minecraft client = Minecraft.getInstance();
@@ -165,27 +201,91 @@ final class FabricTranslationRuntime {
                 || active == null || config == null
                 || !config.allows(kind)
                 || client.level == null || client.getConnection() == null) {
-            return;
+            return false;
         }
         final String original = text.getString();
         if (original == null || original.trim().isEmpty()
                 || RECENT_USER_TEXT.shouldPreserve(original)) {
-            return;
+            return false;
+        }
+        final String repeatKey = urgentHudKey(text, kind, overlayTinted);
+        RepeatingDisplayCache.Claim<UrgentHudOutput> claim =
+                URGENT_HUD_REPEATS.acquire(repeatKey);
+        if (claim.displayedValue() != null) {
+            UrgentHudOutput displayed = claim.displayedValue();
+            replayUrgentHudText(kind, displayed.text, displayed.tinted);
+            return true;
+        }
+        if (!claim.isClaimed()) {
+            return true;
+        }
+        OrderedDisplayQueue<UrgentHudOutput> queue = urgentHudQueue(kind);
+        final OrderedDisplayQueue.Ticket<UrgentHudOutput> ticket = queue.offer();
+        if (ticket == null) {
+            URGENT_HUD_REPEATS.fail(repeatKey);
+            return false;
         }
         active.translateInteractive(original, kind, config.targetLanguage, config.translateEnglishOnly)
-                .thenAccept(result -> {
-                    if (result == null || !result.isTranslated()) {
+                .whenComplete((result, failure) -> {
+                    if (failure != null || session != active
+                            || activeConfig != config || result == null) {
+                        URGENT_HUD_REPEATS.fail(repeatKey);
+                        ticket.complete(null);
                         return;
                     }
                     String translated = result.getTranslatedText();
-                    if (translated == null || translated.equals(original)) {
-                        return;
-                    }
-                    Component styled = BookTextStyler.rebuild(text, translated, text.getStyle(), kind);
+                    Component styled = result.isTranslated() && translated != null
+                            && !translated.equals(original)
+                            ? BookTextStyler.rebuild(text, translated, text.getStyle(), kind) : text;
                     final Component output = styled == null
-                            ? Component.literal(translated).setStyle(text.getStyle()) : styled;
-                    client.execute(() -> replayUrgentHudText(kind, output, overlayTinted));
+                            ? (result.isTranslated() && translated != null
+                            ? Component.literal(translated).setStyle(text.getStyle()) : text) : styled;
+                    UrgentHudOutput completed =
+                            new UrgentHudOutput(repeatKey, output, overlayTinted);
+                    URGENT_HUD_REPEATS.complete(repeatKey, completed);
+                    ticket.complete(completed);
                 });
+        return true;
+    }
+
+    private static String urgentHudKey(Component text, TextKind kind, boolean tinted) {
+        return kind.name() + '\u0000' + tinted + '\u0000' + text;
+    }
+
+    private static OrderedDisplayQueue<UrgentHudOutput> urgentHudQueue(TextKind kind) {
+        OrderedDisplayQueue<UrgentHudOutput> queue = URGENT_HUD_QUEUES.get(kind);
+        if (queue == null) {
+            OrderedDisplayQueue<UrgentHudOutput> created = new OrderedDisplayQueue<UrgentHudOutput>(8,
+                    kind == TextKind.TITLE || kind == TextKind.SUBTITLE ? 60 : 10);
+            queue = URGENT_HUD_QUEUES.putIfAbsent(kind, created);
+            if (queue == null) {
+                queue = created;
+            }
+        }
+        return queue;
+    }
+
+    static void tickUrgentHudText() {
+        for (TextKind kind : new TextKind[] {
+                TextKind.TITLE, TextKind.SUBTITLE, TextKind.ACTION_BAR }) {
+            UrgentHudOutput output = urgentHudQueue(kind).tick();
+            if (output != null) {
+                URGENT_HUD_REPEATS.markDisplayed(output.repeatKey);
+                replayUrgentHudText(kind, output.text, output.tinted);
+            }
+        }
+    }
+
+    private static final class UrgentHudOutput {
+        private final String repeatKey;
+        private final Component text;
+        private final boolean tinted;
+
+        private UrgentHudOutput(String repeatKey, Component text, boolean tinted) {
+            this.repeatKey = repeatKey;
+            this.text = text;
+            this.tinted = tinted;
+        }
     }
 
     private static void replayUrgentHudText(TextKind kind, Component translated, boolean overlayTinted) {
@@ -197,6 +297,12 @@ final class FabricTranslationRuntime {
         try {
             if (kind == TextKind.ACTION_BAR || kind == TextKind.ITEM_NAME) {
                 client.gui.setOverlayMessage(translated, overlayTinted);
+            } else if (kind == TextKind.SUBTITLE) {
+                client.gui.setSubtitle(translated);
+                client.gui.setTimes(0, 60, 10);
+            } else if (kind == TextKind.TITLE) {
+                client.gui.setTitle(translated);
+                client.gui.setTimes(0, 60, 10);
             }
         } finally {
             replayingUrgentHudText = false;
@@ -265,6 +371,8 @@ final class FabricTranslationRuntime {
     static synchronized void shutdown() {
         RenderTranslationSession active = session;
         session = null;
+        URGENT_HUD_QUEUES.clear();
+        URGENT_HUD_REPEATS.clear();
         HologramTextDisplayGroups.clear();
         activeProvider = null;
         protectedPlayerNames = ProtectedLiteralsSnapshot.empty();
@@ -272,7 +380,10 @@ final class FabricTranslationRuntime {
         RECENT_USER_TEXT.clear();
         outgoingTail = CompletableFuture.completedFuture(null);
         if (active != null) {
-            active.close();
+            active.deactivate();
+            Thread closer = new Thread(active::close, "universal-translator-shutdown");
+            closer.setDaemon(true);
+            closer.start();
         }
     }
 
@@ -335,7 +446,8 @@ final class FabricTranslationRuntime {
             return new TranslationDiagnosticsSnapshot(
                     false, "", "", "", null, false, false, -1L, -1L, "尚未载入设置");
         }
-        Path modelFile = config.offlineDirectory.resolve(config.offlineModel.modelFile());
+        Path modelFile = LlamaCppOfflineProvider.modelPath(
+                config.offlineDirectory, config.offlineModel);
         return new TranslationDiagnosticsSnapshot(
                 config.enabled,
                 config.provider,
@@ -398,7 +510,7 @@ final class FabricTranslationRuntime {
                 || client.level == null || client.getConnection() == null) {
             return originals;
         }
-        return active.lookupIndependentLines(originals, kind);
+        return active.lookupWrappedLines(originals, kind);
     }
 
     private static boolean shouldRecordInLog(TextKind kind) {

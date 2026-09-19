@@ -70,6 +70,10 @@ goto fail
 :execute
 @rem Setup the command line
 
+if not defined MC_TRANSLATOR_GRADLE_TEMP set "MC_TRANSLATOR_GRADLE_TEMP=C:\codex-gradle-tmp"
+if not exist "%MC_TRANSLATOR_GRADLE_TEMP%" mkdir "%MC_TRANSLATOR_GRADLE_TEMP%" >nul 2>&1
+set "TEMP=%MC_TRANSLATOR_GRADLE_TEMP%"
+set "TMP=%MC_TRANSLATOR_GRADLE_TEMP%"
 
 
 @rem Execute Gradle

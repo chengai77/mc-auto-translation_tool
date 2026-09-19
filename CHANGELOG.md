@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- 译文颜色默认值由青色改为“保留原色”：新安装与旧配置（沿用旧默认青色）都会在翻译后沿用原文颜色，仍可在设置中改回青色、绿色、金色等独立颜色。
 - I 键翻译日志改为来源白名单：默认仅记录标题、副标题与 Action Bar 文本，可在 I 键界面内按细分类开关自由配置（标题/副标题/Action Bar/聊天/系统消息/Boss Bar/记分板/玩家列表/容器/书/告示牌/断线原因/全息字/其他）。物品名称、Lore 与 Tooltip 始终不进入日志。
 - 修复换行被当成新句子翻译的问题：渲染层新增相邻视觉行聚合器，标题、聊天、系统消息、记分板等视觉换行会作为整段一起翻译，不再逐行拆句降低可读性。
 - 翻译速度优化，重点改善一闪而过的标题类文本：执行队列改为带优先级的阻塞队列，标题/副标题/Action Bar/Boss Bar/Toast 走独立 urgent 通道，不再被普通文本队列阻塞；提交限流分级为 urgent 30/s、priority 16/s、background 4/s。
@@ -14,6 +15,10 @@
 - 设置画面新增目标语言快捷按钮，可在简体中文、繁體中文和 English 之间切换；
   `zh-TW` 会为离线模型明确要求繁体字，并映射到腾讯与 LibreTranslate 的繁中代码。
 - 新增 Minecraft 26.2 Fabric 开发适配，迁移 GUI/HUD API，并完成干净构建、重混淆和共享核心自测。
+- 新增 Minecraft 26.3 Fabric 开发适配：适配 26.3 移除 GLFW 后的输入常量、`InputConstants.Type.KEYBOARD` 与 `SignText` 消息列表返回类型变化，并完成干净构建、重混淆、Mixin 目标核对和共享核心自测；该版本仅提供 Fabric 端。
+- 新增 Minecraft 1.16.5 Fabric 开发适配：使用旧版 Loom 与单一 `src/main` 源集（该版本没有独立服务端 JAR），界面改用 `MatrixStack`、`Screen#onClose`/`isPauseScreen` 与 `TextFieldWidget`，聊天、标题、告示牌、书、实体名、设置、日志与缓存导入导出齐全；受 1.16.5 API 限制不提供全息文本（TextDisplay）翻译，且该版本只有 Fabric 端。
+- 新增 Minecraft 1.18.1 Fabric 开发适配：以 1.17.1 为移植基线（同为 Java 17、单一 `src/main` 源集），按该版本 API 把 `Screen#isPauseScreen` 改为 `shouldPause`，全部 16 个 Mixin 的注入目标与 `@Shadow` 字段已对照映射后的 1.18.1 类文件核对；受 1.18 API 限制不提供全息文本（TextDisplay）翻译，且该版本只有 Fabric 端。
+- 修复 `translator-core` 中 `SegmentBatchTranslator.requestValidated` 未声明 `throws Exception` 造成的编译中断，该问题此前会同时阻断 1.16.5、1.17 等模块的构建。
 - 设置、诊断、按键与运行提示会跟随 Minecraft 语言，现已完整支持简体中文、繁體中文及 English。
 - 翻译已有颜色的服务器文字时保留原始颜色，不再被默认译文颜色覆盖成单色。
 - 设置画面可以直接切换 Lite 与 Quality 离线模型；未知模型配置会回退 Lite。

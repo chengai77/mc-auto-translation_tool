@@ -16,6 +16,7 @@ import java.util.Properties;
 /** 缓存文件格式 */
 final class TranslationCacheFile {
     static final String FILE_NAME = "universal_translator-cache.properties";
+    private static final long MAX_FILE_BYTES = 16L * 1024L * 1024L;
 
     private TranslationCacheFile() {
     }
@@ -23,6 +24,9 @@ final class TranslationCacheFile {
     static Properties read(Path source) throws IOException {
         if (source == null || !Files.isRegularFile(source)) {
             throw new IOException("Cache file does not exist");
+        }
+        if (Files.size(source) > MAX_FILE_BYTES) {
+            throw new IOException("Cache file is too large");
         }
         Properties properties = new Properties();
         try (Reader reader = Files.newBufferedReader(source, StandardCharsets.UTF_8)) {

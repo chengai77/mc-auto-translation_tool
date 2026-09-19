@@ -1,0 +1,27 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.universaltranslator.neoforge.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ChatInputSuggestorMixin",
+    "DebugHudMixin",
+    "BookEditBoxMixin",
+    "BookScreenMixin",
+    "DrawContextMixin",
+    "EntityNameRenderStateMixin",
+    "ScreenMixin",
+    "SignEditScreenMixin",
+    "TextFieldWidgetMixin",
+    "TextDisplayRendererMixin",
+    "TextRendererMixin",
+    "ChatHudMixin",
+    "ChatHudAccessor",
+    "SignRendererContextMixin",
+    "InGameHudContextMixin",
+    "BossBarHudContextMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

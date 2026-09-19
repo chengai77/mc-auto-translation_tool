@@ -1,6 +1,8 @@
 .gradle/
 build/
 **/build/
+bin/
+**/bin/
 run/
 **/run/
 .idea/
@@ -31,3 +33,8 @@ downloads/*
 *.tmp
 config/universal-translator*.json
 config/universal-translator*.properties
+
+# Local build consolidation script; keep it machine-local and out of Git.
+tools/local/
+C:/codex-gradle-tmp/
+.gradle-tmp/

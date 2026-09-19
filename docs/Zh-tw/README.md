@@ -4,8 +4,8 @@
 
 一個面向 Minecraft Java 版的公益、開源、純用戶端全介面翻譯模組。
 
-[⬇️ 下載最新版](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/latest) ·
-[🌐 官方下載頁面](https://mc-auto-translation-tool.wuxiangdan96.chatgpt.site/#download) ·
+[⬇️ 下載最新版](https://github.com/chengai77/mc-auto-translation_tool/releases) ·
+[🌐 官方下載頁面](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases) ·
 [📚 語言目錄](../README.md) · [📖 安裝及使用說明](USER_GUIDE.md)
 
 原作者：[Bilibili「我小张7272635」](https://space.bilibili.com/3546631091783712)。
@@ -17,17 +17,19 @@ Action Bar、標題、Boss Bar、容器標題、物品名稱與 Lore、告示牌
 
 ## 下載
 
-建議從 [GitHub Releases 下載最新版](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/latest)。
+建議從 [GitHub Releases 下載最新版](https://github.com/chengai77/mc-auto-translation_tool/releases)。
 請務必選擇與你的 Minecraft 版本及模組載入器完全相符的檔案：
 
 | Minecraft | 載入器 | 下載 |
 | --- | --- | --- |
-| 1.8.9 | Forge | [下載 JAR](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/MCAutoTranslationTool-1.1-mc1.8.9-forge.jar) |
-| 1.12.2 | Forge | [下載 JAR](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/MCAutoTranslationTool-1.1-mc1.12.2-forge.jar) |
-| 1.21.11 | Fabric | [下載 JAR](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/MCAutoTranslationTool-1.1-mc1.21.11-fabric.jar) |
+| 1.8.9 | Forge | [下載 JAR](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v2026-08-25/mc-auto-translation-tool-forge-1.8.9-1.1.jar) |
+| 1.12.2 | Forge | [下載 JAR](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v2026-08-25/mc-auto-translation-tool-forge-1.12.2-1.1.jar) |
+| 1.21.11 | Fabric | [下載 JAR](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v2026-08-25/mc-auto-translation-tool-fabric-1.21.11-1.1.jar) |
+| 1.21.10 | Fabric | 開發轉接，暫未發佈 JAR |
+| 1.16.5 | Fabric | 開發轉接，暫未發佈 JAR |
 
-[查看所有版本與更新說明](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases) ·
-[SHA-256 校驗檔案](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/SHA256SUMS.txt)
+[查看所有版本與更新說明](https://github.com/chengai77/mc-auto-translation_tool/releases) ·
+[SHA-256 校驗檔案](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v1.1/SHA256SUMS.txt)
 
 ## 設計原則
 
@@ -45,16 +47,21 @@ Action Bar、標題、Boss Bar、容器標題、物品名稱與 Lore、告示牌
 
 | Minecraft | 載入器 | Java |
 | --- | --- | --- |
-| 26.2（開發中） | Fabric | 25 |
-| 26.1（開發中） | Fabric | 25 |
+| 26.3 | Fabric | 25 |
+| 26.2 | Fabric | 25 |
+| 26.1 | Fabric | 25 |
 | 1.21.11 | Fabric | 21 |
+| 1.21.10 | Fabric | 21 |
+| 1.18.1 | Fabric | 17 |
+| 1.16.5 | Fabric | 8 |
 | 1.12.2 | Forge | 8 |
 | 1.8.9 | Forge | 8 |
 
 不同遊戲版本會產生不同的 JAR，但共用相同的核心邏輯及設定語意。
 
-26.1 已通過建置及主選單啟動檢查；26.2 已完成原始碼轉接及建置檢查。兩者在完成
-伺服器內人工迴歸前不提供正式版下載，也不能與 1.21.11 的 JAR 混用。
+主分支另包含 Fabric 1.16.5、1.18.1、1.21.10、26.1、26.2 與 26.3 開發轉接；1.16.5 使用 Java 8，1.18.1 使用 Java 17，1.21.10 使用 Java 21，26.x 使用 Java 25。
+1.16.5 已完成原始碼轉接並通過啟動至主選單檢查，1.18.1 已完成原始碼轉接與建置自我測試；兩者只有 Fabric 端，且受版本 API 限制不提供全息文字翻譯。26.2 與 26.3 已完成乾淨建置、
+重新混淆及共用核心自我測試；在實機啟動及伺服器內迴歸完成前，不列入上方正式版下載。
 
 ## 目前狀態
 
@@ -83,7 +90,7 @@ LibreTranslate 或舊版騰訊相容模式。
 - 快取譯文，並合併同時發生的相同請求。
 - 對已經是目標語言或只包含數字的內容略過連線。
 - 中英文混合文字只翻譯英文片段，已有中文保持不變。
-- 譯文可使用青色、綠色、金色等獨立顏色，也可保留原始顏色。
+- 譯文預設保留原始顏色，也可選用青色、綠色、金色等獨立顏色。
 - 翻譯服務異常時傳回原文。
 - 背景翻譯不會阻塞彩現執行緒。
 - 儲存設定後無須重新啟動遊戲即可套用。

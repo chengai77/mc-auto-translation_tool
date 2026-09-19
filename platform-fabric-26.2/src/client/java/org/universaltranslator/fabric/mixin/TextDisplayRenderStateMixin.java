@@ -13,6 +13,9 @@ abstract class TextDisplayRenderStateMixin implements TextDisplayAnchorState {
     @Unique
     private float universalTranslator$horizontalOffset;
 
+    @Unique
+    private boolean universalTranslator$playerFollowHidden;
+
     @Override
     public float universalTranslator$getTopAnchorOffset() {
         return universalTranslator$topAnchorOffset;
@@ -31,5 +34,15 @@ abstract class TextDisplayRenderStateMixin implements TextDisplayAnchorState {
     @Override
     public void universalTranslator$setHorizontalOffset(float offset) {
         universalTranslator$horizontalOffset = offset;
+    }
+
+    @Override
+    public boolean universalTranslator$isPlayerFollowHidden() {
+        return universalTranslator$playerFollowHidden;
+    }
+
+    @Override
+    public void universalTranslator$setPlayerFollowHidden(boolean hidden) {
+        universalTranslator$playerFollowHidden = hidden;
     }
 }

@@ -3,6 +3,9 @@ pluginManagement {
         maven { url = "https://maven.aliyun.com/repository/gradle-plugin" }
         maven { url = "https://maven.aliyun.com/repository/public" }
         maven { url = "https://maven.fabricmc.net/" }
+        maven { url = "https://maven.architectury.dev/" }
+        maven { url = "https://maven.minecraftforge.net/" }
+        maven { url = "https://maven.neoforged.net/releases/" }
         gradlePluginPortal()
     }
 }
@@ -11,12 +14,24 @@ dependencyResolutionManagement {
     repositories {
         maven { url = "https://maven.aliyun.com/repository/public" }
         maven { url = "https://maven.fabricmc.net/" }
+        maven { url = "https://maven.architectury.dev/" }
+        maven { url = "https://maven.minecraftforge.net/" }
+        maven { url = "https://maven.neoforged.net/releases/" }
         mavenCentral()
     }
 }
 
 rootProject.name = "mc-auto-translation-tool"
 include("translator-core")
+include("platform-fabric-1.20.1")
+include("platform-fabric-1.16.5")
+include("platform-fabric-1.17")
+include("platform-fabric-1.18.1")
+include("platform-fabric-1.20.4")
+include("platform-fabric-1.21.1")
+include("platform-fabric-1.21.4")
+include("platform-fabric-1.21.10")
 include("platform-fabric-1.21.11")
 include("platform-fabric-26.1")
 include("platform-fabric-26.2")
+include("platform-fabric-26.3")

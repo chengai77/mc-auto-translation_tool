@@ -22,6 +22,37 @@ public final class VerifiedDownloader {
         void onProgress(long downloadedBytes, long totalBytes);
     }
 
+    /** 可在下载线程外取消当前网络连接。 */
+    public static final class Cancellation {
+        private volatile boolean cancelled;
+        private volatile HttpURLConnection connection;
+
+        public void cancel() {
+            cancelled = true;
+            HttpURLConnection active = connection;
+            if (active != null) {
+                active.disconnect();
+            }
+        }
+
+        public boolean isCancelled() {
+            return cancelled;
+        }
+
+        private void register(HttpURLConnection next) {
+            connection = next;
+            if (cancelled) {
+                next.disconnect();
+            }
+        }
+
+        private void clear(HttpURLConnection current) {
+            if (connection == current) {
+                connection = null;
+            }
+        }
+    }
+
     private static final ProgressListener NO_PROGRESS = new ProgressListener() {
         @Override
         public void onProgress(long downloadedBytes, long totalBytes) {
@@ -59,6 +90,18 @@ public final class VerifiedDownloader {
             String expectedSha256,
             ProgressListener progress
     ) throws IOException {
+        return download(sources, destination, expectedSize, expectedSha256, progress, null);
+    }
+
+    /** 带进度且可取消的下载。 */
+    public static Path download(
+            Iterable<URI> sources,
+            Path destination,
+            long expectedSize,
+            String expectedSha256,
+            ProgressListener progress,
+            Cancellation cancellation
+    ) throws IOException {
         if (expectedSize < 1L || expectedSha256 == null || expectedSha256.length() != 64) {
             throw new IllegalArgumentException("A pinned size and SHA-256 are required");
         }
@@ -68,10 +111,11 @@ public final class VerifiedDownloader {
         if (progress == null) {
             throw new IllegalArgumentException("Progress listener is required");
         }
+        checkCancelled(cancellation);
         Files.createDirectories(destination.toAbsolutePath().getParent());
         if (Files.isRegularFile(destination)
                 && Files.size(destination) == expectedSize
-                && expectedSha256.equalsIgnoreCase(sha256(destination))) {
+                && expectedSha256.equalsIgnoreCase(sha256(destination, cancellation))) {
             progress.onProgress(expectedSize, expectedSize);
             return destination;
         }
@@ -82,8 +126,11 @@ public final class VerifiedDownloader {
             attempted++;
             try {
                 requireSafeDownloadUri(source);
+                checkCancelled(cancellation);
                 return downloadFromSource(
-                        source, destination, expectedSize, expectedSha256, progress);
+                        source, destination, expectedSize, expectedSha256, progress, cancellation);
+            } catch (DownloadCancelledException cancelled) {
+                throw cancelled;
             } catch (IOException error) {
                 failure = appendFailure(failure, source, error);
             }
@@ -99,8 +146,10 @@ public final class VerifiedDownloader {
             Path destination,
             long expectedSize,
             String expectedSha256,
-            ProgressListener progress
+            ProgressListener progress,
+            Cancellation cancellation
     ) throws IOException {
+        checkCancelled(cancellation);
         Path partial = destination.resolveSibling(destination.getFileName().toString() + ".part");
         long offset = Files.isRegularFile(partial) ? Files.size(partial) : 0L;
         if (offset > expectedSize) {
@@ -108,48 +157,55 @@ public final class VerifiedDownloader {
             offset = 0L;
         }
 
-        HttpURLConnection connection = open(source, offset, 0);
-        int status = connection.getResponseCode();
-        boolean append = offset > 0L && status == HttpURLConnection.HTTP_PARTIAL;
-        if (status < 200 || status >= 300) {
-            connection.disconnect();
-            throw new IOException("Download returned HTTP " + status + " for " + source.getHost());
-        }
-        if (!append) {
-            offset = 0L;
-        }
-        validateResponse(connection, status, offset, expectedSize, append);
-        progress.onProgress(offset, expectedSize);
+        HttpURLConnection connection = open(source, offset, 0, cancellation);
+        try {
+            int status = connection.getResponseCode();
+            boolean append = offset > 0L && status == HttpURLConnection.HTTP_PARTIAL;
+            if (status < 200 || status >= 300) {
+                throw new IOException("Download returned HTTP " + status + " for " + source.getHost());
+            }
+            if (!append) {
+                offset = 0L;
+            }
+            validateResponse(connection, status, offset, expectedSize, append);
+            checkCancelled(cancellation);
+            progress.onProgress(offset, expectedSize);
 
-        StandardOpenOption[] options = append
-                ? new StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.APPEND}
-                : new StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
-        try (InputStream input = connection.getInputStream();
-             OutputStream output = Files.newOutputStream(partial, options)) {
-            byte[] buffer = new byte[64 * 1024];
-            long total = offset;
-            int count;
-            while ((count = input.read(buffer)) >= 0) {
-                if (count == 0) {
-                    continue;
+            StandardOpenOption[] options = append
+                    ? new StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.APPEND}
+                    : new StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
+            try (InputStream input = connection.getInputStream();
+                 OutputStream output = Files.newOutputStream(partial, options)) {
+                byte[] buffer = new byte[64 * 1024];
+                long total = offset;
+                int count;
+                while ((count = input.read(buffer)) >= 0) {
+                    checkCancelled(cancellation);
+                    if (count == 0) {
+                        continue;
+                    }
+                    total += count;
+                    if (total > expectedSize) {
+                        throw new IOException("Download exceeded its pinned size");
+                    }
+                    output.write(buffer, 0, count);
+                    progress.onProgress(total, expectedSize);
                 }
-                total += count;
-                if (total > expectedSize) {
-                    throw new IOException("Download exceeded its pinned size");
-                }
-                output.write(buffer, 0, count);
-                progress.onProgress(total, expectedSize);
             }
         } finally {
             connection.disconnect();
+            if (cancellation != null) {
+                cancellation.clear(connection);
+            }
         }
 
+        checkCancelled(cancellation);
         long actualSize = Files.size(partial);
         if (actualSize != expectedSize) {
             throw new IOException("Download is incomplete (" + actualSize + "/" + expectedSize
                     + " bytes); it will resume automatically next time");
         }
-        String actualSha256 = sha256(partial);
+        String actualSha256 = sha256(partial, cancellation);
         if (!expectedSha256.equalsIgnoreCase(actualSha256)) {
             Files.deleteIfExists(partial);
             throw new IOException("Downloaded file failed SHA-256 verification");
@@ -208,6 +264,15 @@ public final class VerifiedDownloader {
     }
 
     public static String sha256(Path file) throws IOException {
+        return sha256(file, null);
+    }
+
+    public static String sha256(Path file, Cancellation cancellation) throws IOException {
+        return sha256(file, cancellation, true);
+    }
+
+    private static String sha256(
+            Path file, Cancellation cancellation, boolean cancellable) throws IOException {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
@@ -218,6 +283,9 @@ public final class VerifiedDownloader {
             byte[] buffer = new byte[64 * 1024];
             int count;
             while ((count = input.read(buffer)) >= 0) {
+                if (cancellable) {
+                    checkCancelled(cancellation);
+                }
                 digest.update(buffer, 0, count);
             }
         }
@@ -228,12 +296,17 @@ public final class VerifiedDownloader {
         return hex.toString();
     }
 
-    private static HttpURLConnection open(URI uri, long offset, int redirects) throws IOException {
+    private static HttpURLConnection open(
+            URI uri, long offset, int redirects, Cancellation cancellation) throws IOException {
         if (redirects > MAX_REDIRECTS) {
             throw new IOException("Too many download redirects");
         }
+        checkCancelled(cancellation);
         requireSafeDownloadUri(uri);
         HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
+        if (cancellation != null) {
+            cancellation.register(connection);
+        }
         connection.setConnectTimeout(15_000);
         connection.setReadTimeout(30_000);
         connection.setInstanceFollowRedirects(false);
@@ -241,16 +314,41 @@ public final class VerifiedDownloader {
         if (offset > 0L) {
             connection.setRequestProperty("Range", "bytes=" + offset + "-");
         }
-        int status = connection.getResponseCode();
+        int status;
+        try {
+            status = connection.getResponseCode();
+        } catch (IOException | RuntimeException failure) {
+            connection.disconnect();
+            if (cancellation != null) {
+                cancellation.clear(connection);
+            }
+            throw failure;
+        }
         if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
             String location = connection.getHeaderField("Location");
             connection.disconnect();
+            if (cancellation != null) {
+                cancellation.clear(connection);
+            }
             if (location == null) {
                 throw new IOException("Download redirect did not include a destination");
             }
-            return open(uri.resolve(location), offset, redirects + 1);
+            return open(uri.resolve(location), offset, redirects + 1, cancellation);
         }
         return connection;
+    }
+
+    private static void checkCancelled(Cancellation cancellation) throws IOException {
+        if ((cancellation != null && cancellation.isCancelled())
+                || Thread.currentThread().isInterrupted()) {
+            throw new DownloadCancelledException();
+        }
+    }
+
+    private static final class DownloadCancelledException extends IOException {
+        private DownloadCancelledException() {
+            super("Offline download was cancelled");
+        }
     }
 
     private static void requireSafeDownloadUri(URI uri) {

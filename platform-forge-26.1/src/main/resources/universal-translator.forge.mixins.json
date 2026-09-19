@@ -1,0 +1,28 @@
+{
+  "required": true,
+  "package": "org.universaltranslator.forge.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "ChatInputSuggestorMixin",
+    "DebugHudMixin",
+    "BookEditBoxMixin",
+    "BookScreenMixin",
+    "DrawContextMixin",
+    "EntityNameRenderStateMixin",
+    "ScreenMixin",
+    "SignEditScreenMixin",
+    "TextFieldWidgetMixin",
+    "TextDisplayRenderStateMixin",
+    "TextDisplayRendererMixin",
+    "TextRendererMixin",
+    "GuiMessageMixin",
+    "ChatComponentAccessor",
+    "SignRendererContextMixin",
+    "InGameHudContextMixin",
+    "BossBarHudContextMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
+

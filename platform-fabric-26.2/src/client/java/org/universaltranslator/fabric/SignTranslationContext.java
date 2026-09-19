@@ -146,18 +146,8 @@ public final class SignTranslationContext {
         }
 
         private float verticalOffset() {
-            if (!translationReady || lineHeight <= 0) {
-                return 0.0F;
-            }
-            List<String> lines = displayLines(defaultMeasurer);
-            int visibleLines = 0;
-            for (String line : lines) {
-                if (line != null && !line.trim().isEmpty()) {
-                    visibleLines++;
-                }
-            }
-            return visibleLines <= 0 ? 0.0F
-                    : (originals.size() - visibleLines) * lineHeight / 2.0F;
+            // 译文已按行槽位对齐，渲染位置由原版按槽位给出，额外偏移会把译文推低一格
+            return 0.0F;
         }
 
         private List<String> displayLines(WidthMeasurer measurer) {
@@ -169,7 +159,7 @@ public final class SignTranslationContext {
             }
             WidthMeasurer effectiveMeasurer = measurer == null ? defaultMeasurer : measurer;
             List<String> lines = wrapForSign(
-                    rawTranslated, originals.size(), maxWidth, effectiveMeasurer);
+                    originals, rawTranslated, maxWidth, effectiveMeasurer);
             if (effectiveMeasurer != null) {
                 displayLines = lines;
             }
@@ -177,12 +167,35 @@ public final class SignTranslationContext {
         }
     }
 
+    /** 逐行沿用前确认不超宽，避免译文被裁切 */
+    private static boolean fitsSignWidth(
+            List<String> lines, int maxWidth, WidthMeasurer measurer) {
+        if (measurer == null || maxWidth <= 0) {
+            return true;
+        }
+        for (String line : lines) {
+            if (line != null && !line.isEmpty() && measurer.width(line) > maxWidth) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static List<String> wrapForSign(
+            List<String> originals,
             List<String> translated,
-            int lineCount,
             int maxWidth,
             WidthMeasurer measurer
     ) {
+        int lineCount = originals.size();
+        if (VisualTextBoundaries.hasGraphicLayout(originals)) {
+            List<String> result = new ArrayList<String>(lineCount);
+            for (int index = 0; index < lineCount; index++) {
+                result.add(index < translated.size() && translated.get(index) != null
+                        ? translated.get(index) : "");
+            }
+            return result;
+        }
         if (measurer == null || maxWidth <= 0) {
             List<String> result = new ArrayList<String>(lineCount);
             for (int index = 0; index < lineCount; index++) {
@@ -190,8 +203,18 @@ public final class SignTranslationContext {
             }
             return result;
         }
-        if (VisualTextBoundaries.hasSeparatorLine(translated)) {
-            return wrapSectionsForSign(translated, lineCount, maxWidth, measurer);
+        if (VisualTextBoundaries.hasSeparatorLine(originals)) {
+            return wrapSectionsForSign(
+                    originals, translated, maxWidth, measurer);
+        }
+        if (translated.size() == lineCount && fitsSignWidth(translated, maxWidth, measurer)) {
+            // 行槽位已对齐，逐行沿用，避免再次分行打乱布局
+            List<String> aligned = new ArrayList<String>(lineCount);
+            for (int index = 0; index < lineCount; index++) {
+                String line = translated.get(index);
+                aligned.add(line == null ? "" : line);
+            }
+            return aligned;
         }
         List<String> result = new ArrayList<String>(lineCount);
         List<String> wrapped = wrapSignText(
@@ -203,32 +226,34 @@ public final class SignTranslationContext {
     }
 
     private static List<String> wrapSectionsForSign(
+            List<String> originals,
             List<String> translated,
-            int lineCount,
             int maxWidth,
             WidthMeasurer measurer
     ) {
+        int lineCount = originals.size();
         List<String> result = new ArrayList<String>(lineCount);
         int index = 0;
         while (index < lineCount) {
-            String line = index < translated.size() ? translated.get(index) : "";
-            if (VisualTextBoundaries.isSeparatorLine(line)) {
-                result.add(line.trim());
+            String original = originals.get(index);
+            if (VisualTextBoundaries.isSeparatorLine(original)) {
+                result.add(original.trim());
                 index++;
                 continue;
             }
+            int start = index;
             List<String> group = new ArrayList<String>();
             while (index < lineCount) {
-                line = index < translated.size() ? translated.get(index) : "";
-                if (VisualTextBoundaries.isSeparatorLine(line)) {
+                if (VisualTextBoundaries.isSeparatorLine(originals.get(index))) {
                     break;
                 }
-                group.add(line);
+                String line = index < translated.size() ? translated.get(index) : "";
+                group.add(VisualTextBoundaries.stripAttachedSeparatorRuns(line));
                 index++;
             }
             List<String> wrapped = wrapSignText(
-                    joinTranslated(group), group.size(), maxWidth, measurer);
-            for (int slot = 0; slot < group.size(); slot++) {
+                    joinTranslated(group), index - start, maxWidth, measurer);
+            for (int slot = 0; slot < index - start; slot++) {
                 result.add(slot < wrapped.size() ? wrapped.get(slot) : "");
             }
         }

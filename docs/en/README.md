@@ -4,8 +4,8 @@
 
 A charity-driven, open-source, client-only full-interface translation mod for Minecraft Java Edition.
 
-[⬇️ Download the latest release](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/latest) ·
-[🌐 Official download page](https://mc-auto-translation-tool.wuxiangdan96.chatgpt.site/#download) ·
+[⬇️ Download the latest release](https://github.com/chengai77/mc-auto-translation_tool/releases) ·
+[🌐 Official download page](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases) ·
 [📚 Language directory](../README.md) · [📖 Installation and usage guide](USER_GUIDE.md)
 
 Original author: [Bilibili creator “我小张7272635”](https://space.bilibili.com/3546631091783712).
@@ -19,17 +19,19 @@ codes are preserved by default.
 
 ## Downloads
 
-We recommend downloading the latest version from [GitHub Releases](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/latest).
+We recommend downloading the latest version from [GitHub Releases](https://github.com/chengai77/mc-auto-translation_tool/releases).
 Make sure that the file exactly matches your Minecraft version and mod loader:
 
 | Minecraft | Loader | Download |
 | --- | --- | --- |
-| 1.8.9 | Forge | [Download JAR](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/MCAutoTranslationTool-1.1-mc1.8.9-forge.jar) |
-| 1.12.2 | Forge | [Download JAR](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/MCAutoTranslationTool-1.1-mc1.12.2-forge.jar) |
-| 1.21.11 | Fabric | [Download JAR](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/MCAutoTranslationTool-1.1-mc1.21.11-fabric.jar) |
+| 1.8.9 | Forge | [Download JAR](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v2026-08-25/mc-auto-translation-tool-forge-1.8.9-1.1.jar) |
+| 1.12.2 | Forge | [Download JAR](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v2026-08-25/mc-auto-translation-tool-forge-1.12.2-1.1.jar) |
+| 1.21.11 | Fabric | [Download JAR](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v2026-08-25/mc-auto-translation-tool-fabric-1.21.11-1.1.jar) |
+| 1.21.10 | Fabric | Development adaptation; JAR not released yet |
+| 1.16.5 | Fabric | Development adaptation; JAR not released yet |
 
-[View all releases and release notes](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases) ·
-[SHA-256 checksum file](https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/releases/download/v1.1/SHA256SUMS.txt)
+[View all releases and release notes](https://github.com/chengai77/mc-auto-translation_tool/releases) ·
+[SHA-256 checksum file](https://github.com/chengai77/mc-auto-translation_tool/releases/download/v1.1/SHA256SUMS.txt)
 
 ## Design principles
 
@@ -47,17 +49,25 @@ Make sure that the file exactly matches your Minecraft version and mod loader:
 
 | Minecraft | Loader | Java |
 | --- | --- | --- |
-| 26.2 (development) | Fabric | 25 |
-| 26.1 (development) | Fabric | 25 |
+| 26.3 | Fabric | 25 |
+| 26.2 | Fabric | 25 |
+| 26.1 | Fabric | 25 |
 | 1.21.11 | Fabric | 21 |
+| 1.21.10 | Fabric | 21 |
+| 1.18.1 | Fabric | 17 |
+| 1.16.5 | Fabric | 8 |
 | 1.12.2 | Forge | 8 |
 | 1.8.9 | Forge | 8 |
 
 Each game version produces a separate JAR while sharing the same core logic and configuration semantics.
 
-Fabric 26.1 passed build and main-menu launch checks. Fabric 26.2 has source adaptation and build
-checks complete. Neither has a release download before its manual in-server regression, and the
-1.21.11 JAR must not be used for either version.
+The main branch also contains Fabric 1.16.5, 1.18.1, 1.21.10, 26.1, 26.2, and 26.3 development adaptations;
+1.16.5 uses Java 8, 1.18.1 uses Java 17, 1.21.10 uses Java 21, and 26.x uses Java 25. Fabric 1.16.5 is Fabric-only, has
+passed a main-menu launch check, and does not provide hologram text (TextDisplay) translation because
+that API does not exist in 1.16.5; Fabric 1.18.1 is Fabric-only as well and has passed a clean build,
+remapping, and the shared core self-test. Fabric 26.2 and 26.3 have passed clean builds, reobfuscation, and
+shared core self-tests; they are not listed in the official download table above until real-game
+startup and in-server regression are complete.
 
 ## Current status
 
@@ -89,7 +99,7 @@ Verified behavior includes:
 - Caching translations and coalescing identical concurrent requests.
 - Skipping network access for text that is already in the target language or contains only numbers.
 - Translating only English segments in mixed Chinese-English text while preserving existing Chinese text.
-- Applying a separate aqua, green, gold, or other selected color to translations, or retaining the original color.
+- Keeping the original color by default, or applying a separately selected aqua, green, gold, or other color.
 - Returning the original text when the translation service fails.
 - Keeping background translation off the render thread.
 - Applying saved settings without restarting the game.

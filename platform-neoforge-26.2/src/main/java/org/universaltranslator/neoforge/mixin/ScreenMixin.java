@@ -1,0 +1,29 @@
+package org.universaltranslator.neoforge.mixin;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.universaltranslator.neoforge.RenderedTextBridge;
+
+import java.util.List;
+
+/** 物品提示前翻译 */
+@Mixin(Screen.class)
+abstract class ScreenMixin {
+    @Inject(
+            method = "getTooltipFromItem(Lnet/minecraft/client/Minecraft;Lnet/minecraft/world/item/ItemStack;)Ljava/util/List;",
+            at = @At("RETURN"),
+            cancellable = true)
+    private static void universalTranslator$translateItemTooltip(
+            Minecraft client,
+            ItemStack stack,
+            CallbackInfoReturnable<List<Component>> callback) {
+        callback.setReturnValue(RenderedTextBridge.translateItemTooltip(callback.getReturnValue()));
+    }
+}
+

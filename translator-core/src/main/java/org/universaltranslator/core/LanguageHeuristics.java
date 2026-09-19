@@ -1,5 +1,7 @@
 package org.universaltranslator.core;
 
+import java.util.Locale;
+
 /** 离线预检避免联网 */
 public final class LanguageHeuristics {
     private LanguageHeuristics() {
@@ -42,6 +44,30 @@ public final class LanguageHeuristics {
             return false;
         }
         return true;
+    }
+
+    /** 全大写文本转为句首大写，无需处理时返回 null */
+    public static String normalizeAllCaps(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        boolean hasLetter = false;
+        boolean hasLowerCase = false;
+        for (int index = 0; index < text.length(); index++) {
+            char value = text.charAt(index);
+            if (Character.isLetter(value)) {
+                hasLetter = true;
+                if (Character.isLowerCase(value)) {
+                    hasLowerCase = true;
+                    break;
+                }
+            }
+        }
+        if (!hasLetter || hasLowerCase) {
+            return null;
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
     }
 
     private static boolean isChineseTarget(String language) {

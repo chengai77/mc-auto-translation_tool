@@ -165,7 +165,8 @@ final class SegmentBatchTranslator {
     }
 
     private String cached(String source) {
-        String translated = cache.get(cacheKey(source));
+        String translated = TranslationCacheIdentity.get(
+                cache, provider.id(), cacheFormatVersion, cacheIdentity(source));
         if (translated == null) {
             return null;
         }
@@ -206,7 +207,8 @@ final class SegmentBatchTranslator {
         for (int index = 0; index < sources.size(); index++) {
             String source = sources.get(index);
             String output = translated.get(index);
-            cache.put(cacheKey(source), output);
+            TranslationCacheIdentity.put(
+                    cache, cacheFormatVersion, cacheIdentity(source), output);
             recentContext.remember(source, output, kind);
             for (Part part : missing.get(source)) {
                 part.resolve(output);
@@ -223,7 +225,7 @@ final class SegmentBatchTranslator {
             SegmentBatchProtocol.Batch batch = SegmentBatchProtocol.encode(sources);
             String translated = provider.translate(new TranslationRequest(
                     batch.request(), sourceLanguage, targetLanguage, kind,
-                    recentContext.snapshot(kind)));
+                    recentContext.snapshot(kind, batch.request())));
             if (translated == null || translated.trim().isEmpty()) {
                 throw new IllegalArgumentException(
                         "Provider returned an empty batch translation");
@@ -248,17 +250,39 @@ final class SegmentBatchTranslator {
     }
 
     private List<String> requestSingle(String source) throws Exception {
-        String translated = provider.translate(new TranslationRequest(
-                source, sourceLanguage, targetLanguage, kind,
-                recentContext.snapshot(kind)));
-        return java.util.Collections.singletonList(
-                TranslationOutputValidator.requireValid(
-                        source, translated, targetLanguage));
+        String translated = requestValidated(source, source);
+        if (translated == null) {
+            // 全大写文本易被模型原样返回，改写后重试
+            String normalized = LanguageHeuristics.normalizeAllCaps(source);
+            if (normalized != null) {
+                translated = requestValidated(normalized, source);
+            }
+        }
+        if (translated == null) {
+            throw new IllegalArgumentException("Provider returned no valid translation");
+        }
+        return java.util.Collections.singletonList(translated);
     }
 
-    private String cacheKey(String source) {
-        return cacheFormatVersion + "\n" + provider.id()
-                + "\n" + sourceLanguage + "\n" + targetLanguage + "\n" + source;
+    /** 请求并校验，异常译文按无结果处理 */
+    private String requestValidated(String requestText, String validationText)
+            throws Exception {
+        try {
+            String translated = provider.translate(new TranslationRequest(
+                    requestText, sourceLanguage, targetLanguage, kind,
+                    recentContext.snapshot(kind, requestText)));
+            if (translated == null || translated.trim().isEmpty()) {
+                return null;
+            }
+            return TranslationOutputValidator.requireValid(
+                    validationText, translated, targetLanguage);
+        } catch (IllegalArgumentException invalidOutput) {
+            return null;
+        }
+    }
+
+    private String cacheIdentity(String source) {
+        return sourceLanguage + "\n" + targetLanguage + "\n" + source;
     }
 
     private static final class Part {

@@ -1,0 +1,76 @@
+plugins {
+    id "architectury-plugin" version "3.4.162"
+    id "dev.architectury.loom" version "1.13.467"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = "mc-auto-translation-tool-forge-${minecraft_1_20_4_version}"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+    withSourcesJar()
+}
+
+loom {
+    silentMojangMappingsLicense()
+    mods {
+        "universal_translator" {
+            sourceSet sourceSets.main
+        }
+    }
+    forge {
+        mixinConfig "universal-translator.forge.mixins.json"
+        mixinConfig "universal-translator.forge-loader.mixins.json"
+    }
+}
+
+architectury {
+    platformSetupLoomIde()
+    forge()
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir rootProject.file("../translator-core/src/main/java")
+        }
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_1_20_4_version}"
+    mappings "net.fabricmc:yarn:${yarn_1_20_4_mappings}:v2"
+    forge "net.minecraftforge:forge:${forge_1_20_4_version}"
+}
+
+configurations.runtimeClasspath {
+    exclude group: "net.fabricmc", module: "fabric-log4j-util"
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("META-INF/mods.toml") {
+        expand "version": project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.release = 17
+}
+
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(rootProject.file("../LICENSE")) {
+        rename { "LICENSE_universal_translator" }
+    }
+    from(rootProject.file("../docs/en/THIRD_PARTY_OFFLINE.md")) {
+        rename { "THIRD_PARTY_OFFLINE.md" }
+    }
+}

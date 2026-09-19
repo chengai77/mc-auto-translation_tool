@@ -1,0 +1,3 @@
+pluginManagement { repositories { maven { url = "https://maven.aliyun.com/repository/gradle-plugin" }; maven { url = "https://maven.architectury.dev/" }; maven { url = "https://maven.fabricmc.net/" }; maven { url = "https://maven.neoforged.net/releases/" }; gradlePluginPortal() } }
+dependencyResolutionManagement { repositories { maven { url = "https://maven.aliyun.com/repository/public" }; maven { url = "https://maven.architectury.dev/" }; maven { url = "https://maven.fabricmc.net/" }; maven { url = "https://maven.neoforged.net/releases/" }; mavenCentral() } }
+rootProject.name = "mc-auto-translation-tool-neoforge-26.1"

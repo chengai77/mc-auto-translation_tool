@@ -11,11 +11,13 @@ public final class OfflineProviderShutdownProbe {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 1) {
-            throw new IllegalArgumentException("Expected an installed offline root");
+        if (args.length < 1 || args.length > 2) {
+            throw new IllegalArgumentException("Expected an installed offline root and optional model");
         }
-        LlamaCppOfflineProvider provider = new LlamaCppOfflineProvider(
-                Paths.get(args[0]), false);
+        OfflineModel model = args.length == 2
+                ? OfflineModel.fromConfig(args[1]) : OfflineModel.LITE;
+        LlamaCppOfflineProvider provider = LlamaCppOfflineProvider.forModel(
+                Paths.get(args[0]), false, model);
         TranslationCoordinator coordinator = new TranslationCoordinator(
                 provider, new TranslationCache(100), 1);
         verifyTranslation(coordinator, "Open the chest", TextKind.TOOLTIP);
@@ -26,6 +28,12 @@ public final class OfflineProviderShutdownProbe {
         verifyTranslation(coordinator, "AIaA facility.", TextKind.SUBTITLE);
         verifyTranslation(coordinator, "VHS Retrieved", TextKind.SUBTITLE);
         verifyTranslation(coordinator, "Cabin radio antenna ON", TextKind.SUBTITLE);
+        String hub = verifyTranslation(
+                coordinator, "Control Cloud Hub", TextKind.HOLOGRAM);
+        if (TranslationOutputGuard.containsInstructionArtifact(hub)
+                || hub.contains("翻译") || hub.contains("翻譯")) {
+            throw new AssertionError("Offline model added translation commentary: " + hub);
+        }
         String question = verifyTranslation(
                 coordinator, "What model are you? Please tell me.", TextKind.CHAT);
         if (question.indexOf('?') < 0 && question.indexOf('\uff1f') < 0) {

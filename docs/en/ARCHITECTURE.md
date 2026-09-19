@@ -41,9 +41,13 @@ separate compatible JARs.
 
 ## Capture strategy
 
-- Fabric 1.21.11, 26.1, and 26.2 replace display copies at the corresponding final
+- Fabric 1.21.10, 1.21.11, 26.1, 26.2, and 26.3 replace display copies at the corresponding final
   `DrawContext`/`GuiGraphicsExtractor` and `TextRenderer`/`Font` render entry points, while recording
   the content type during chat, scoreboard, Tab list, title, Action Bar, and Boss Bar rendering.
+- Fabric 1.16.5 has neither `DrawContext` nor `TextDisplay`; that module draws through `MatrixStack`
+  and the static `DrawableHelper` helpers and receives titles and subtitles through the shared
+  `InGameHud#setTitles` entry point, so it does not provide hologram text translation and relies on
+  the generic font entry point for capture.
 - Forge 1.8.9/1.12.2 use one LaunchWrapper ASM core plugin to replace strings at the
   `FontRenderer` draw and width-calculation entry points. The chat HUD adds a lightweight context
   used to enforce the chat privacy toggle.

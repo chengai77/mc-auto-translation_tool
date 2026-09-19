@@ -2,8 +2,19 @@
 
 [简体中文](../Zh-cn/BUILDING.md) · [繁體中文](BUILDING.md) · [English](../en/BUILDING.md) · [返回繁中 README](README.md)
 
-專案由一個 Java 8 通用核心、三個現代 Fabric 模組及兩個獨立舊版 Forge 建置組成。
+專案由一個 Java 8 通用核心、九個現代 Fabric 模組、一個 1.16.5 Fabric 模組及兩個獨立舊版 Forge 建置組成。
 舊版 ForgeGradle 無法直接在現代 JDK 上執行，因此無法用一條根 Gradle 指令建置所有版本。
+
+## 26.3 Fabric
+
+需要 JDK 25 或更新版本：
+
+```bash
+./gradlew :platform-fabric-26.3:build
+```
+
+輸出位於 `platform-fabric-26.3/build/libs/`。該版本只有 Fabric 端，沒有對應的
+Forge/NeoForge 工程。
 
 ## 26.2 Fabric
 
@@ -34,6 +45,29 @@
 ```
 
 輸出位於 `platform-fabric-1.21.11/build/libs/`。
+
+## 1.21.10 Fabric
+
+需要 JDK 21 或更新版本：
+
+```bash
+./gradlew :platform-fabric-1.21.10:build
+```
+
+輸出位於 `platform-fabric-1.21.10/build/libs/`。
+
+## 1.16.5 Fabric
+
+需要 JDK 8 編譯目標；本機實際啟動驗證使用 Java 8：
+
+```bash
+./gradlew :platform-fabric-1.16.5:build
+```
+
+輸出位於 `platform-fabric-1.16.5/build/libs/`。該版本使用舊版 Loom 與單一
+`src/main` 源集（1.16.5 沒有獨立伺服器 JAR，不能用 `splitEnvironmentSourceSets()`），
+而且只有 Fabric 端。注意 1.16.5 時代的 Fabric API 模組 id 是 `fabric`，不是
+`fabric-api`，`fabric.mod.json` 的相依項目需要依此撰寫。
 
 ## 1.12.2 Forge
 

@@ -99,8 +99,15 @@ public final class PersistentTranslationCache implements TranslationStore {
         } catch (IOException malformedCache) {
             return;
         }
+        boolean normalized = false;
         for (String key : properties.stringPropertyNames()) {
-            entries.put(key, properties.getProperty(key));
+            String storedKey = isHashKey(key) ? key.toLowerCase()
+                    : TranslationCacheFile.hashKey(key);
+            entries.put(storedKey, properties.getProperty(key));
+            normalized |= !storedKey.equals(key);
+        }
+        if (normalized) {
+            persistBestEffort();
         }
     }
 

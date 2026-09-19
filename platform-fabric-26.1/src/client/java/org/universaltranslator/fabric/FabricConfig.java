@@ -15,6 +15,7 @@ import org.universaltranslator.core.provider.KimiOfficialProvider;
 import org.universaltranslator.core.provider.ZhipuOfficialProvider;
 import org.universaltranslator.core.provider.LlamaCppOfflineProvider;
 import org.universaltranslator.core.provider.OpenAiChatTranslationProvider;
+import org.universaltranslator.core.offline.OfflineStoragePaths;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -90,7 +91,7 @@ final class FabricConfig {
         this.translateEnglishOnly = Boolean.parseBoolean(
                 properties.getProperty("translate-english-only", "true"));
         this.translatedTextColor = TranslationTextColor.fromConfig(
-                properties.getProperty("translated-text-color", "aqua"));
+                properties.getProperty("translated-text-color", "original"));
         this.provider = properties.getProperty("provider", "offline").trim();
         this.endpoint = properties.getProperty(
                 "libretranslate-endpoint", "http://127.0.0.1:5000/translate").trim();
@@ -133,7 +134,7 @@ final class FabricConfig {
                 properties.getProperty("log-allowed-kinds", defaultLogAllowedKinds())));
         this.configFile = configFile;
         this.cacheFile = cacheFile;
-        this.offlineDirectory = configFile.getParent().resolve("universal-translator-offline");
+        this.offlineDirectory = OfflineStoragePaths.sharedDirectory();
     }
 
     static FabricConfig load(Path configDirectory) throws IOException {
@@ -154,13 +155,17 @@ final class FabricConfig {
         Properties properties = defaults();
         properties.putAll(stored);
         boolean legacyMigration = !stored.containsKey("config-version");
-        boolean migrated = configVersion(stored) < 5;
+        boolean migrated = configVersion(stored) < 6;
         if (legacyMigration) {
             properties.setProperty("display-mode", "translated-only");
             properties.setProperty("translate-english-only", "true");
-            properties.setProperty("translated-text-color", "aqua");
+            properties.setProperty("translated-text-color", "original");
+        } else if (migrated
+                && "aqua".equalsIgnoreCase(properties.getProperty("translated-text-color", ""))) {
+            // 旧默认色迁移为保留原色
+            properties.setProperty("translated-text-color", "original");
         }
-        properties.setProperty("config-version", "5");
+        properties.setProperty("config-version", "6");
         LocalConfigSecurity.restrictToOwner(file);
         FabricConfig loaded = new FabricConfig(
                 properties, file, configDirectory.resolve("universal-translator-cache.properties"));
@@ -346,7 +351,8 @@ final class FabricConfig {
     TranslationProvider createProvider() {
         if ("offline".equalsIgnoreCase(provider)) {
             TranslationProvider local = LlamaCppOfflineProvider.forModel(
-                    offlineDirectory, offlineAutoDownload, offlineModel);
+                    offlineDirectory, offlineAutoDownload, offlineModel,
+                    OfflineStoragePaths.legacySearchRoots(configFile.getParent()));
             return apiFallback
                     ? new FallbackTranslationProvider(local, createApiProvider(apiFallbackProvider))
                     : local;
@@ -432,7 +438,7 @@ final class FabricConfig {
 
     private static Properties defaults() {
         Properties properties = new Properties();
-        properties.setProperty("config-version", "5");
+        properties.setProperty("config-version", "6");
         properties.setProperty("enabled", "false");
         properties.setProperty("translate-chat", "true");
         properties.setProperty("translate-other", "true");
@@ -441,7 +447,7 @@ final class FabricConfig {
         properties.setProperty("outgoing-target-language", "en");
         properties.setProperty("display-mode", "translated-only");
         properties.setProperty("translate-english-only", "true");
-        properties.setProperty("translated-text-color", "aqua");
+        properties.setProperty("translated-text-color", "original");
         properties.setProperty("provider", "offline");
         properties.setProperty("libretranslate-endpoint", "http://127.0.0.1:5000/translate");
         properties.setProperty("api-key", "");
@@ -475,7 +481,7 @@ final class FabricConfig {
 
     private Properties toProperties() {
         Properties properties = new Properties();
-        properties.setProperty("config-version", "5");
+        properties.setProperty("config-version", "6");
         properties.setProperty("enabled", Boolean.toString(enabled));
         properties.setProperty("translate-chat", Boolean.toString(translateChat));
         properties.setProperty("translate-other", Boolean.toString(translateOther));

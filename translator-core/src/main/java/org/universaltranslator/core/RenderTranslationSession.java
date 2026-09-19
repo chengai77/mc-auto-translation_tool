@@ -61,6 +61,7 @@ public final class RenderTranslationSession implements AutoCloseable {
             new SubmissionWindow(MAX_URGENT_SUBMISSIONS_PER_SECOND);
     private final VisualLineGrouper visualLineGrouper = new VisualLineGrouper();
     private volatile boolean closed;
+    private boolean resourcesClosed;
     private volatile String lastFailureStatus = "";
     private volatile BiConsumer<TextKind, String> urgentCompletionListener;
     private volatile BiConsumer<TextKind, String> renderCompletionListener;
@@ -174,24 +175,15 @@ public final class RenderTranslationSession implements AutoCloseable {
                 if (group.collecting()) {
                     return original;
                 }
-                if (effectiveKind == TextKind.HOLOGRAM) {
-                    return group.lineResult(lookupStableVisualLines(group.lines, effectiveKind));
-                }
-                String grouped = lookupDirect(group.text, effectiveKind);
-                if (!group.text.equals(grouped)) {
-                    return group.lineResult(grouped);
-                }
-                return original;
+                return group.lineResult(
+                        lookupStableVisualLines(group.lines, effectiveKind));
             }
         }
         return lookupDirect(original, effectiveKind);
     }
 
     private static boolean allowsVisualGrouping(TextKind kind) {
-        return kind == TextKind.TITLE
-                || kind == TextKind.SUBTITLE
-                || kind == TextKind.ACTION_BAR
-                || kind == TextKind.BOSS_BAR
+        return kind == TextKind.BOSS_BAR
                 || kind == TextKind.HOLOGRAM
                 || kind == TextKind.BOOK;
     }
@@ -219,13 +211,9 @@ public final class RenderTranslationSession implements AutoCloseable {
         Iterable<String> currentProtectedLiterals = dynamicProtectedLiterals
                 ? snapshotProtectedLiterals() : Collections.<String>emptyList();
         String protectedContextKey = protectedLiteralsCacheKey(currentProtectedLiterals);
-        TranslationResult cached = dynamicProtectedLiterals
-                ? coordinator.cachedRenderedTranslation(
-                        original, sourceLanguage, targetLanguage, effectiveKind,
-                        preserveHanText, protectedContextKey)
-                : coordinator.cachedTranslation(
-                        original, sourceLanguage, targetLanguage, effectiveKind,
-                        currentProtectedLiterals, preserveHanText);
+        TranslationResult cached = cachedTranslation(
+                original, effectiveKind, targetLanguage, preserveHanText,
+                currentProtectedLiterals, protectedContextKey);
         if (cached != null) {
             completeLookup(key, original, cached, null);
             return cached.isTranslated() ? cached.getTranslatedText() : original;
@@ -234,7 +222,7 @@ public final class RenderTranslationSession implements AutoCloseable {
         // 限制模型负载
         // 独立额度分配
         // 世界文本优先
-        if (!submissionWindow(effectiveKind).tryAcquire()) {
+        if (!isUrgent(effectiveKind) && !submissionWindow(effectiveKind).tryAcquire()) {
             return original;
         }
         if (!tryMarkPending(key, effectiveKind)) {
@@ -348,8 +336,12 @@ public final class RenderTranslationSession implements AutoCloseable {
         if (usesIndependentLineTranslation(kind)) {
             return lookupIndependentLines(originals, kind);
         }
+        if (kind == TextKind.SIGN
+                && VisualTextBoundaries.hasDecorativeLayout(originals)) {
+            return lookupIndependentLines(originals, kind);
+        }
         if (preservesSeparatorBoundaries(kind)) {
-            List<String> separated = lookupWithSeparatorBoundaries(originals, kind);
+            List<String> separated = lookupWithLayoutBoundaries(originals, kind);
             if (separated != null) {
                 return separated;
             }
@@ -406,7 +398,7 @@ public final class RenderTranslationSession implements AutoCloseable {
                     });
         }
         if (preservesSeparatorBoundaries(kind)) {
-            List<String> separated = lookupWithSeparatorBoundaries(originals, kind);
+            List<String> separated = lookupWithLayoutBoundaries(originals, kind);
             if (separated != null) {
                 return separated;
             }
@@ -414,28 +406,37 @@ public final class RenderTranslationSession implements AutoCloseable {
         return lookupJoinedLines(originals, kind, true);
     }
 
-    private List<String> lookupWithSeparatorBoundaries(List<String> originals, TextKind kind) {
-        if (!VisualTextBoundaries.hasSeparatorLine(originals)) {
+    private List<String> lookupWithLayoutBoundaries(List<String> originals, TextKind kind) {
+        if (!VisualTextBoundaries.hasSeparatorLine(originals)
+                && !(kind == TextKind.SIGN
+                && VisualTextBoundaries.hasGraphicLayout(originals))) {
             return null;
         }
         List<String> result = new ArrayList<String>(originals.size());
         int index = 0;
         while (index < originals.size()) {
             String line = originals.get(index);
-            if (VisualTextBoundaries.isSeparatorLine(line)) {
+            if (isFixedLayoutLine(kind, originals, line)) {
                 result.add(line);
                 index++;
                 continue;
             }
             int start = index;
             while (index < originals.size()
-                    && !VisualTextBoundaries.isSeparatorLine(originals.get(index))) {
+                    && !isFixedLayoutLine(kind, originals, originals.get(index))) {
                 index++;
             }
             result.addAll(lookupJoinedLines(
                     new ArrayList<String>(originals.subList(start, index)), kind, true));
         }
         return result.equals(originals) ? originals : result;
+    }
+
+    private static boolean isFixedLayoutLine(
+            TextKind kind, List<String> lines, String line) {
+        return VisualTextBoundaries.isSeparatorLine(line)
+                || (kind == TextKind.SIGN && VisualTextBoundaries.hasGraphicLayout(lines)
+                && VisualTextBoundaries.isGraphicLine(line));
     }
 
     public List<String> lookupIndependentLines(List<String> originals, TextKind kind) {
@@ -454,6 +455,16 @@ public final class RenderTranslationSession implements AutoCloseable {
             }
         }
         return translatedLines == null ? originals : translatedLines;
+    }
+
+    /**
+     * 将视觉换行行合并为一个翻译请求，再按原行数分配译文。
+     */
+    public List<String> lookupWrappedLines(List<String> originals, TextKind kind) {
+        if (originals == null || originals.isEmpty()) {
+            return originals;
+        }
+        return lookupJoinedLines(originals, kind == null ? TextKind.OTHER : kind);
     }
 
     private static boolean preservesLineBoundaries(TextKind kind) {
@@ -505,6 +516,17 @@ public final class RenderTranslationSession implements AutoCloseable {
         } catch (RuntimeException ignored) {
             literals = Collections.emptyList();
         }
+        String protectedContextKey = protectedLiteralsCacheKey(literals);
+        TranslationResult cached = cachedTranslation(
+                original,
+                kind == null ? TextKind.CHAT : kind,
+                target,
+                preserveHanText,
+                literals,
+                protectedContextKey);
+        if (cached != null) {
+            return CompletableFuture.completedFuture(cached);
+        }
         return coordinator.translate(
                 original,
                 sourceLanguage,
@@ -512,7 +534,33 @@ public final class RenderTranslationSession implements AutoCloseable {
                 kind == null ? TextKind.CHAT : kind,
                 literals,
                 preserveHanText,
-                protectedLiteralsCacheKey(literals));
+                protectedContextKey);
+    }
+
+    private TranslationResult cachedTranslation(
+            String original,
+            TextKind kind,
+            String requestedTargetLanguage,
+            boolean requestedPreserveHanText,
+            Iterable<String> literals,
+            String protectedContextKey
+    ) {
+        TranslationResult cached = null;
+        if (dynamicProtectedLiterals) {
+            cached = coordinator.cachedRenderedTranslation(
+                    original, sourceLanguage, requestedTargetLanguage, kind,
+                    requestedPreserveHanText, protectedContextKey);
+        }
+        if (cached != null) {
+            return cached;
+        }
+        if (dynamicProtectedLiterals
+                && !(literals instanceof ProtectedLiteralsSnapshot)) {
+            return null;
+        }
+        return coordinator.cachedTranslation(
+                original, sourceLanguage, requestedTargetLanguage, kind,
+                literals, requestedPreserveHanText);
     }
 
     private Iterable<String> snapshotProtectedLiterals() {
@@ -809,12 +857,18 @@ public final class RenderTranslationSession implements AutoCloseable {
 
     @Override
     public synchronized void close() {
-        if (closed) {
+        if (resourcesClosed) {
             return;
         }
         closed = true;
+        resourcesClosed = true;
         coordinator.close();
         clearMemoryOnClose();
+    }
+
+    /** 立即停用，资源由后台释放。 */
+    public void deactivate() {
+        closed = true;
     }
 
     private static final class RenderKey {

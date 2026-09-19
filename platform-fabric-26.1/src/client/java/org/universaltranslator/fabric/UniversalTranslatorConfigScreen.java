@@ -303,6 +303,10 @@ final class UniversalTranslatorConfigScreen extends Screen {
                     this.width / 2, infoY + 15, 0xA0A0A0);
         }
         super.extractRenderState(graphics, mouseX, mouseY, delta);
+        Component watermark = Component.literal("由承挨二次开发");
+        graphics.text(this.font, watermark,
+                Math.max(4, this.width - this.font.width(watermark) - 6),
+                Math.max(4, this.height - this.font.lineHeight - 4), 0x88B0B0B0);
     }
 
     @Override

@@ -1,7 +1,10 @@
 package org.universaltranslator.fabric;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FontDescription;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
@@ -17,11 +20,15 @@ import org.universaltranslator.core.TextKind;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class RenderedTextBridge {
     private static final AtomicBoolean ITEM_TOOLTIP_REACHED = new AtomicBoolean();
     private static final AtomicBoolean ITEM_TOOLTIP_APPLIED = new AtomicBoolean();
     private static final ThreadLocal<Boolean> BOOK_PAGE_PENDING = new ThreadLocal<Boolean>();
+    private static final ConcurrentHashMap<Integer, EntityNameSnapshot> ENTITY_NAME_SNAPSHOTS =
+            new ConcurrentHashMap<Integer, EntityNameSnapshot>();
+    private static final int MAX_ENTITY_NAME_SNAPSHOTS = 4_096;
 
     private RenderedTextBridge() {
     }
@@ -48,14 +55,18 @@ public final class RenderedTextBridge {
     }
 
     public static Component translate(Component text) {
-        if (text == null) {
-            return null;
+        if (text == null || TranslationRenderContext.isTextInput()
+                || TranslationRenderContext.isTranslationSuppressed()) {
+            return text;
         }
         TextKind currentKind = TranslationRenderContext.current();
         if (isChatKind(currentKind)) {
             return text;
         }
         String original = text.getString();
+        if (FabricLocalTextGuard.isLocalInput(Minecraft.getInstance(), original)) {
+            return text;
+        }
         String translated = translateRaw(original);
         if (original.equals(translated)) {
             return text;
@@ -95,16 +106,59 @@ public final class RenderedTextBridge {
         return pending != null && pending.booleanValue();
     }
 
-    public static Component translateEntityName(Component text) {
-        return translateDirectText(text, TextKind.ENTITY_NAME);
+    public static Component translateEntityName(Entity entity, Component text) {
+        if (text == null || entity == null) {
+            return text;
+        }
+        if (entity == Minecraft.getInstance().player
+                && Minecraft.getInstance().options.getCameraType().isFirstPerson()) {
+            return null;
+        }
+        int entityId = entity.getId();
+        String original = text.getString();
+        EntityNameSnapshot snapshot = ENTITY_NAME_SNAPSHOTS.get(entityId);
+        if (snapshot != null && original.equals(snapshot.translated)) {
+            return text;
+        }
+        String translated = FabricTranslationRuntime.translateForRender(
+                original, TextKind.ENTITY_NAME);
+        if (original.equals(translated)) {
+            if (snapshot != null && original.equals(snapshot.source)
+                    && !original.equals(snapshot.translated)) {
+                return rebuildStyledText(text, original, snapshot.translated,
+                        TextKind.ENTITY_NAME);
+            }
+            return text;
+        }
+        ENTITY_NAME_SNAPSHOTS.put(entityId,
+                new EntityNameSnapshot(original, translated));
+        trimEntityNameSnapshots();
+        return rebuildStyledText(text, original, translated, TextKind.ENTITY_NAME);
+    }
+
+    private static void trimEntityNameSnapshots() {
+        while (ENTITY_NAME_SNAPSHOTS.size() > MAX_ENTITY_NAME_SNAPSHOTS) {
+            Integer first = ENTITY_NAME_SNAPSHOTS.keys().nextElement();
+            ENTITY_NAME_SNAPSHOTS.remove(first);
+        }
+    }
+
+    private static final class EntityNameSnapshot {
+        private final String source;
+        private final String translated;
+
+        private EntityNameSnapshot(String source, String translated) {
+            this.source = source;
+            this.translated = translated;
+        }
     }
 
     public static Component translateHeldItemName(Component text) {
         return translateDirectText(text, TextKind.ITEM_NAME);
     }
 
-    public static void preloadUrgentHudText(Component text, TextKind kind, boolean overlayTinted) {
-        FabricTranslationRuntime.preloadUrgentHudText(text, kind, overlayTinted);
+    public static boolean preloadUrgentHudText(Component text, TextKind kind, boolean overlayTinted) {
+        return FabricTranslationRuntime.preloadUrgentHudText(text, kind, overlayTinted);
     }
 
     public static FormattedCharSequence translate(FormattedCharSequence text) {
@@ -123,6 +177,9 @@ public final class RenderedTextBridge {
             return text;
         }
         String original = InlineTextureText.text(text);
+        if (FabricLocalTextGuard.isLocalInput(Minecraft.getInstance(), original)) {
+            return text;
+        }
         Style firstStyle = InlineTextureText.firstStyle(text);
         String translated = translateRaw(original, null, currentKind);
         if (original.equals(translated)) {
@@ -180,6 +237,9 @@ public final class RenderedTextBridge {
             return translate((Component) text);
         }
         String original = text.getString();
+        if (FabricLocalTextGuard.isLocalInput(Minecraft.getInstance(), original)) {
+            return text;
+        }
         String translated = translateRaw(original);
         if (original.equals(translated)) {
             return text;
@@ -335,13 +395,22 @@ public final class RenderedTextBridge {
             String translated = SignTranslationContext.translateLine(text, measurer);
             return translated == null ? text : translated;
         }
+        if (containsLineBreak(text)) {
+            return FabricTranslationRuntime.translateCompleteForRender(text, currentKind);
+        }
         return FabricTranslationRuntime.translateForRender(text, currentKind);
+    }
+
+    private static boolean containsLineBreak(String text) {
+        return text != null && (text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0);
     }
 
     static Style translatedStyle(Style original) {
         if (original == null) {
             original = Style.EMPTY;
         }
+        // 翻译文本使用默认字体
+        original = original.withFont(FontDescription.DEFAULT);
         TranslationTextColor color = FabricTranslationRuntime.translatedTextColor();
         if (original.getColor() != null || color == null || !color.changesColor()) {
             return original;

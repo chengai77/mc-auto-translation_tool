@@ -28,12 +28,15 @@ public final class ProtectedText {
                     + "(?::\\d{1,5})?(?![A-Za-z0-9_.-])";
     private static final String LOCALHOST_SOURCE =
             "(?<![A-Za-z0-9_.-])localhost(?::\\d{1,5})?(?![A-Za-z0-9_.-])";
+    private static final String DECORATIVE_FORMAT_SOURCE =
+            "(?:<<|>>|《|》|〈|〉|＜|＞)";
     private static final String PROTECTED_SOURCE =
             "(?:\\u00a7[0-9A-FK-ORa-fk-or])" +
             "|(?:" + InlineTextureCode.REGEX_SOURCE + ")" +
             "|(?:https?://\\S+|www\\.\\S+)" +
             "|(?:" + BRACKETED_IPV6_SOURCE + "|" + IPV4_SOURCE + "|" + RAW_IPV6_SOURCE
                     + "|" + DOMAIN_SOURCE + "|" + LOCALHOST_SOURCE + ")" +
+            "|" + DECORATIVE_FORMAT_SOURCE +
             "|(?:(?<![A-Za-z0-9_])(?:\\d{1,3}(?:[.,]\\d{3})+|\\d+(?:[.,]\\d+)?)(?:%|ms|s|m|h|d)?(?![A-Za-z0-9_]))" +
             "|(?:%[A-Za-z0-9_.:-]+%)" +
             "|(?:\\{[A-Za-z0-9_.:-]+})";

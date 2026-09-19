@@ -363,7 +363,9 @@ final class BookTextStyler {
     }
 
     private static Style displayStyle(Style original) {
-        Style style = original == null ? Style.EMPTY : original;
+        // 翻译文本使用默认字体
+        Style style = (original == null ? Style.EMPTY : original)
+                .withFont(FontDescription.DEFAULT);
         TranslationTextColor color = FabricTranslationRuntime.translatedTextColor();
         if (style.getColor() != null || color == null || !color.changesColor()) {
             return style;

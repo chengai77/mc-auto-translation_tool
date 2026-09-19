@@ -1,0 +1,26 @@
+{
+  "required": true,
+  "package": "org.universaltranslator.fabric.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ChatInputSuggestorMixin",
+    "DebugHudMixin",
+    "BookEditBoxMixin",
+    "BookScreenMixin",
+    "DrawContextMixin",
+    "EntityNameRenderStateMixin",
+    "ScreenMixin",
+    "SignEditScreenMixin",
+    "TextFieldWidgetMixin",
+    "TextDisplayRendererMixin",
+    "TextRendererMixin",
+    "ChatHudMixin",
+    "ChatHudAccessor",
+    "SignRendererContextMixin",
+    "InGameHudContextMixin",
+    "BossBarHudContextMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

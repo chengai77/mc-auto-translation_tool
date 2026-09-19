@@ -57,9 +57,10 @@ final class StructuredTemplateTranslator {
             String cacheFormatVersion
     ) throws Exception {
         String template = protectedText.getTemplate();
-        String cacheKey = templateCacheKey(
-                cacheFormatVersion, provider.id(), sourceLanguage, targetLanguage, template);
-        String translated = cache.get(cacheKey);
+        String cacheIdentity = templateCacheIdentity(
+                sourceLanguage, targetLanguage, template);
+        String translated = TranslationCacheIdentity.get(
+                cache, provider.id(), cacheFormatVersion, cacheIdentity);
         if (translated != null) {
             try {
                 translated = TranslationOutputValidator.requireValid(
@@ -71,7 +72,8 @@ final class StructuredTemplateTranslator {
                 if (!normalized.equals(translated)) {
                     translated = ProtectedStyleTemplateValidator.requireValid(
                             protectedText, normalized);
-                    cache.put(cacheKey, translated);
+                    TranslationCacheIdentity.put(
+                            cache, cacheFormatVersion, cacheIdentity, translated);
                 }
             } catch (IllegalArgumentException invalidCachedValue) {
                 translated = null;
@@ -86,7 +88,8 @@ final class StructuredTemplateTranslator {
                         "Provider returned an empty translation", false, null);
             }
             translated = restoreStructure(template, translated, kind);
-            cache.put(cacheKey, translated);
+            TranslationCacheIdentity.put(
+                    cache, cacheFormatVersion, cacheIdentity, translated);
         } else {
             translated = restoreStructure(template, translated, kind);
         }
@@ -105,8 +108,9 @@ final class StructuredTemplateTranslator {
             String cacheFormatVersion
     ) {
         String template = protectedText.getTemplate();
-        String translated = cache.get(templateCacheKey(
-                cacheFormatVersion, provider.id(), sourceLanguage, targetLanguage, template));
+        String translated = TranslationCacheIdentity.get(
+                cache, provider.id(), cacheFormatVersion,
+                templateCacheIdentity(sourceLanguage, targetLanguage, template));
         if (translated == null) {
             throw new IllegalStateException("Cached translation is missing");
         }
@@ -137,7 +141,7 @@ final class StructuredTemplateTranslator {
             RecentTranslationContext recentContext
     ) throws Exception {
         String template = protectedText.getTemplate();
-        String context = recentContext.snapshot(kind);
+        String context = recentContext.snapshot(kind, template);
         String numericHint = NumericTranslationContext.of(protectedText)
                 .describe(targetLanguage);
         IllegalArgumentException lastInvalidOutput = null;
@@ -278,15 +282,13 @@ final class StructuredTemplateTranslator {
         return restored;
     }
 
-    private static String templateCacheKey(
-            String cacheFormatVersion,
-            String providerId,
+    private static String templateCacheIdentity(
             String sourceLanguage,
             String targetLanguage,
             String template
     ) {
-        return cacheFormatVersion + "\n" + providerId
-                + "\n" + sourceLanguage + "\n" + targetLanguage + "\nstructured-template\n" + template;
+        return sourceLanguage + "\n" + targetLanguage
+                + "\nstructured-template\n" + template;
     }
 
     static final class TemplateTranslationException extends IllegalStateException {

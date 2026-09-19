@@ -2,65 +2,56 @@ package org.universaltranslator.fabric;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
 import org.universaltranslator.core.TranslationTextStyling;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
 
 /** 本地输入识别 */
 final class FabricLocalTextGuard {
-    private static volatile Field chatField;
-    private static volatile boolean searched;
-
     private FabricLocalTextGuard() {
     }
 
-    static boolean isLocalChatInput(Minecraft client, String rendered) {
-        if (client == null || !(client.screen instanceof ChatScreen)
-                || rendered == null || rendered.isEmpty()) {
+    static boolean isLocalInput(Minecraft client, String rendered) {
+        if (client == null || rendered == null || rendered.isEmpty()) {
             return false;
         }
-        EditBox field = findChatField(client.screen);
-        return field != null && matches(field.getValue(), rendered);
-    }
-
-    private static EditBox findChatField(Screen screen) {
-        Field known = chatField;
-        if (!searched) {
-            synchronized (FabricLocalTextGuard.class) {
-                if (!searched) {
-                    chatField = findTextField(screen.getClass());
-                    searched = true;
-                }
-                known = chatField;
+        for (EditBox field : findTextFields(client.screen)) {
+            if (field.isFocused() && matches(field.getValue(), rendered)) {
+                return true;
             }
         }
-        if (known == null) {
-            return null;
-        }
-        try {
-            Object value = known.get(screen);
-            return value instanceof EditBox ? (EditBox) value : null;
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-            return null;
-        }
+        return false;
     }
 
-    private static Field findTextField(Class<?> type) {
-        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+    private static List<EditBox> findTextFields(Screen screen) {
+        List<EditBox> fields = new ArrayList<EditBox>();
+        if (screen == null) {
+            return fields;
+        }
+        for (Object child : screen.children()) {
+            if (child instanceof EditBox) {
+                fields.add((EditBox) child);
+            }
+        }
+        for (Class<?> current = screen.getClass(); current != null; current = current.getSuperclass()) {
             for (Field field : current.getDeclaredFields()) {
-                if (EditBox.class.isAssignableFrom(field.getType())) {
-                    try {
-                        field.setAccessible(true);
-                        return field;
-                    } catch (RuntimeException ignored) {
-                        return null;
+                if (!EditBox.class.isAssignableFrom(field.getType())) {
+                    continue;
+                }
+                try {
+                    field.setAccessible(true);
+                    Object value = field.get(screen);
+                    if (value instanceof EditBox) {
+                        fields.add((EditBox) value);
                     }
+                } catch (ReflectiveOperationException | RuntimeException ignored) {
                 }
             }
         }
-        return null;
+        return fields;
     }
 
     private static boolean matches(String typed, String rendered) {
@@ -68,9 +59,7 @@ final class FabricLocalTextGuard {
             return false;
         }
         String visible = TranslationTextStyling.stripLegacyFormatting(rendered);
-        if (visible.equals(typed) || visible.equals(typed + "_")) {
-            return true;
-        }
-        return visible.length() >= 2 && typed.contains(visible);
+        return visible.equals(typed) || visible.equals(typed + "_")
+                || visible.length() >= 2 && typed.contains(visible);
     }
 }

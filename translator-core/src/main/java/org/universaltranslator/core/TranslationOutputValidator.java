@@ -5,7 +5,6 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,38 +21,6 @@ public final class TranslationOutputValidator {
             "\\{UT_(?:STYLE|HOLOGRAM_BLOCK)_\\d+_(?:START|END)}");
     private static final Pattern UNEXPECTED_BRACKET_PLACEHOLDER = Pattern.compile(
             "\\[\\[[A-Za-z][A-Za-z0-9_.:-]{0,31}\\]\\]");
-    private static final String[] INSTRUCTION_FRAGMENTS = {
-            "translate minecraft server interface text",
-            "minecraft server interface text from",
-            "translate the minecraft ui text",
-            "translate the user text to",
-            "minecraft ui text in zh-cn",
-            "return only the translation",
-            "reply with only the translation",
-            "output translated text only",
-            "you are a translation engine",
-            "preserve tokens like",
-            "keep every __ut_",
-            "copy every __ut_",
-            "player names, numbers, urls",
-            "minecraft formatting markers",
-            "urls, punctuation and minecraft",
-            "minecraft/game glossary",
-            "preset glossary",
-            "recent context from cached translations",
-            "resolve ambiguous words",
-            "do not explain",
-            "never repeat text",
-            "游戏服务器界面文本从自动翻译",
-            "服务器界面文本从自动翻译",
-            "返回的是原文本翻译",
-            "只返回译文",
-            "仅返回翻译",
-            "玩家名、数字、url",
-            "minecraft格式标记",
-            "不要解释",
-            "翻译引擎"
-    };
 
     private TranslationOutputValidator() {
     }
@@ -70,9 +37,7 @@ public final class TranslationOutputValidator {
         if (!source.contains("\n") && (output.contains("\n") || output.contains("\r"))) {
             throw invalidOutput("Translation output unexpectedly contains multiple lines");
         }
-        if (containsInstructionArtifact(output)) {
-            throw invalidOutput("Translation output echoed its instructions");
-        }
+        TranslationOutputGuard.requireClean(source, output);
         if (!UNEXPECTED_BRACKET_PLACEHOLDER.matcher(source).find()
                 && UNEXPECTED_BRACKET_PLACEHOLDER.matcher(output).find()) {
             throw invalidOutput("Translation output introduced a placeholder-like token");
@@ -123,9 +88,7 @@ public final class TranslationOutputValidator {
         if (TOKEN.matcher(output).find()) {
             throw invalidOutput("Restored translation leaked an internal placeholder");
         }
-        if (containsInstructionArtifact(output)) {
-            throw invalidOutput("Restored translation echoed its instructions");
-        }
+        TranslationOutputGuard.requireClean(source, output);
         if (!InlineTextureCode.hasSameSequence(source, output)) {
             throw invalidOutput("Restored translation changed inline texture codes");
         }
@@ -201,7 +164,8 @@ public final class TranslationOutputValidator {
         if (text == null || text.isEmpty()) {
             return false;
         }
-        return TOKEN.matcher(text).find() || containsInstructionArtifact(text);
+        return TOKEN.matcher(text).find()
+                || TranslationOutputGuard.containsInstructionArtifact(text);
     }
 
     /** 检测占位符失败。 */
@@ -242,21 +206,6 @@ public final class TranslationOutputValidator {
         }
         matcher.appendTail(output);
         return output.toString();
-    }
-
-    private static boolean containsInstructionArtifact(String text) {
-        String normalized = text.toLowerCase(Locale.ROOT);
-        if (normalized.contains("<|system|>")
-                || normalized.contains("<|assistant|>")
-                || normalized.contains("[quote]")) {
-            return true;
-        }
-        for (String fragment : INSTRUCTION_FRAGMENTS) {
-            if (normalized.contains(fragment)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static Map<String, Integer> tokenCounts(String text) {

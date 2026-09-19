@@ -15,6 +15,7 @@ import org.universaltranslator.core.provider.KimiOfficialProvider;
 import org.universaltranslator.core.provider.ZhipuOfficialProvider;
 import org.universaltranslator.core.provider.LlamaCppOfflineProvider;
 import org.universaltranslator.core.provider.OpenAiChatTranslationProvider;
+import org.universaltranslator.core.offline.OfflineStoragePaths;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -28,6 +29,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.EnumSet;
+import java.util.Set;
 import java.util.Properties;
 
 final class LegacyConfig {
@@ -63,6 +66,13 @@ final class LegacyConfig {
     final String apiFallbackProvider;
     final File offlineDirectory;
     final boolean diskCache;
+    final boolean pinnedLogEnabled;
+    final String pinnedLogPreset;
+    final int pinnedLogX;
+    final int pinnedLogY;
+    final int pinnedLogWidth;
+    final int pinnedLogScale;
+    final Set<TextKind> logAllowedKinds;
     final File cacheFile;
     private final File configFile;
 
@@ -80,7 +90,7 @@ final class LegacyConfig {
         translateEnglishOnly = Boolean.parseBoolean(
                 properties.getProperty("translate-english-only", "true"));
         translatedTextColor = TranslationTextColor.fromConfig(
-                properties.getProperty("translated-text-color", "aqua"));
+                properties.getProperty("translated-text-color", "original"));
         provider = properties.getProperty("provider", "offline").trim();
         endpoint = properties.getProperty(
                 "libretranslate-endpoint", "http://127.0.0.1:5000/translate").trim();
@@ -111,9 +121,18 @@ final class LegacyConfig {
         apiFallbackProvider = properties.getProperty(
                 "api-fallback-provider", "libretranslate").trim();
         diskCache = Boolean.parseBoolean(properties.getProperty("disk-cache", "true"));
+        pinnedLogEnabled = Boolean.parseBoolean(
+                properties.getProperty("pinned-log-enabled", "false"));
+        pinnedLogPreset = normalizePinnedPreset(properties.getProperty("pinned-log-preset", "top-right"));
+        pinnedLogX = clampInt(properties.getProperty("pinned-log-x", "12"), 0, 500);
+        pinnedLogY = clampInt(properties.getProperty("pinned-log-y", "12"), 0, 500);
+        pinnedLogWidth = clampInt(properties.getProperty("pinned-log-width", "38"), 20, 90);
+        pinnedLogScale = clampInt(properties.getProperty("pinned-log-scale", "100"), 70, 160);
+        logAllowedKinds = parseLogAllowedKinds(
+                properties.getProperty("log-allowed-kinds", defaultLogAllowedKinds()));
         this.configFile = configFile;
         this.cacheFile = cacheFile;
-        this.offlineDirectory = new File(configFile.getParentFile(), "universal-translator-offline");
+        this.offlineDirectory = OfflineStoragePaths.sharedDirectory().toFile();
     }
 
     static LegacyConfig load(File configDirectory) throws IOException {
@@ -136,13 +155,17 @@ final class LegacyConfig {
         Properties properties = defaults();
         properties.putAll(stored);
         boolean legacyMigration = !stored.containsKey("config-version");
-        boolean migrated = configVersion(stored) < 3;
+        boolean migrated = configVersion(stored) < 6;
         if (legacyMigration) {
             properties.setProperty("display-mode", "translated-only");
             properties.setProperty("translate-english-only", "true");
-            properties.setProperty("translated-text-color", "aqua");
+            properties.setProperty("translated-text-color", "original");
+        } else if (migrated
+                && "aqua".equalsIgnoreCase(properties.getProperty("translated-text-color", ""))) {
+            // 旧默认色迁移为保留原色
+            properties.setProperty("translated-text-color", "original");
         }
-        properties.setProperty("config-version", "3");
+        properties.setProperty("config-version", "6");
         LocalConfigSecurity.restrictToOwner(file.toPath());
         LegacyConfig loaded = new LegacyConfig(
                 properties, file, new File(configDirectory, "universal-translator-cache.properties"));
@@ -218,6 +241,31 @@ final class LegacyConfig {
         return new LegacyConfig(properties, configFile, cacheFile);
     }
 
+    LegacyConfig withPinnedLogSettings(
+            boolean enabled, String preset, int x, int y, int width, int scale) {
+        Properties properties = toProperties();
+        properties.setProperty("pinned-log-enabled", Boolean.toString(enabled));
+        properties.setProperty("pinned-log-preset", normalizePinnedPreset(preset));
+        properties.setProperty("pinned-log-x", Integer.toString(clamp(x, 0, 500)));
+        properties.setProperty("pinned-log-y", Integer.toString(clamp(y, 0, 500)));
+        properties.setProperty("pinned-log-width", Integer.toString(clamp(width, 20, 90)));
+        properties.setProperty("pinned-log-scale", Integer.toString(clamp(scale, 70, 160)));
+        return new LegacyConfig(properties, configFile, cacheFile);
+    }
+
+    LegacyConfig withLogAllowedKind(TextKind kind, boolean allowed) {
+        Properties properties = toProperties();
+        EnumSet<TextKind> kinds = EnumSet.noneOf(TextKind.class);
+        kinds.addAll(logAllowedKinds);
+        if (allowed) {
+            kinds.add(kind);
+        } else {
+            kinds.remove(kind);
+        }
+        properties.setProperty("log-allowed-kinds", joinLogAllowedKinds(kinds));
+        return new LegacyConfig(properties, configFile, cacheFile);
+    }
+
     void save() throws IOException {
         Path file = configFile.toPath();
         Path temporary = file.resolveSibling(file.getFileName().toString() + ".tmp");
@@ -267,7 +315,8 @@ final class LegacyConfig {
     TranslationProvider createProvider() {
         if ("offline".equalsIgnoreCase(provider)) {
             TranslationProvider local = LlamaCppOfflineProvider.forModel(
-                    offlineDirectory.toPath(), offlineAutoDownload, offlineModel);
+                    offlineDirectory.toPath(), offlineAutoDownload, offlineModel,
+                    OfflineStoragePaths.legacySearchRoots(configFile.getParentFile().toPath()));
             return apiFallback
                     ? new FallbackTranslationProvider(local, createApiProvider(apiFallbackProvider))
                     : local;
@@ -385,7 +434,7 @@ final class LegacyConfig {
 
     private static Properties defaults() {
         Properties properties = new Properties();
-        properties.setProperty("config-version", "3");
+        properties.setProperty("config-version", "6");
         properties.setProperty("enabled", "false");
         properties.setProperty("translate-chat", "true");
         properties.setProperty("translate-other", "true");
@@ -394,7 +443,7 @@ final class LegacyConfig {
         properties.setProperty("outgoing-target-language", "en");
         properties.setProperty("display-mode", "translated-only");
         properties.setProperty("translate-english-only", "true");
-        properties.setProperty("translated-text-color", "aqua");
+        properties.setProperty("translated-text-color", "original");
         properties.setProperty("provider", "offline");
         properties.setProperty("libretranslate-endpoint", "http://127.0.0.1:5000/translate");
         properties.setProperty("api-key", "");
@@ -417,12 +466,19 @@ final class LegacyConfig {
         properties.setProperty("api-fallback", "false");
         properties.setProperty("api-fallback-provider", "libretranslate");
         properties.setProperty("disk-cache", "true");
+        properties.setProperty("pinned-log-enabled", "false");
+        properties.setProperty("pinned-log-preset", "top-right");
+        properties.setProperty("pinned-log-x", "12");
+        properties.setProperty("pinned-log-y", "12");
+        properties.setProperty("pinned-log-width", "38");
+        properties.setProperty("pinned-log-scale", "100");
+        properties.setProperty("log-allowed-kinds", defaultLogAllowedKinds());
         return properties;
     }
 
     private Properties toProperties() {
         Properties properties = new Properties();
-        properties.setProperty("config-version", "3");
+        properties.setProperty("config-version", "6");
         properties.setProperty("enabled", Boolean.toString(enabled));
         properties.setProperty("translate-chat", Boolean.toString(translateChat));
         properties.setProperty("translate-other", Boolean.toString(translateOther));
@@ -455,7 +511,60 @@ final class LegacyConfig {
         properties.setProperty("api-fallback", Boolean.toString(apiFallback));
         properties.setProperty("api-fallback-provider", apiFallbackProvider);
         properties.setProperty("disk-cache", Boolean.toString(diskCache));
+        properties.setProperty("pinned-log-enabled", Boolean.toString(pinnedLogEnabled));
+        properties.setProperty("pinned-log-preset", pinnedLogPreset);
+        properties.setProperty("pinned-log-x", Integer.toString(pinnedLogX));
+        properties.setProperty("pinned-log-y", Integer.toString(pinnedLogY));
+        properties.setProperty("pinned-log-width", Integer.toString(pinnedLogWidth));
+        properties.setProperty("pinned-log-scale", Integer.toString(pinnedLogScale));
+        properties.setProperty("log-allowed-kinds", joinLogAllowedKinds(logAllowedKinds));
         return properties;
+    }
+
+    private static String defaultLogAllowedKinds() {
+        return "TITLE,SUBTITLE,ACTION_BAR";
+    }
+
+    private static Set<TextKind> parseLogAllowedKinds(String value) {
+        EnumSet<TextKind> kinds = EnumSet.noneOf(TextKind.class);
+        if (value != null) {
+            for (String token : value.split(",")) {
+                try {
+                    kinds.add(TextKind.valueOf(token.trim().toUpperCase(java.util.Locale.ROOT)));
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+        }
+        return java.util.Collections.unmodifiableSet(kinds);
+    }
+
+    private static String joinLogAllowedKinds(Set<TextKind> kinds) {
+        StringBuilder value = new StringBuilder();
+        for (TextKind kind : TextKind.values()) {
+            if (kinds.contains(kind)) {
+                if (value.length() > 0) {
+                    value.append(',');
+                }
+                value.append(kind.name());
+            }
+        }
+        return value.toString();
+    }
+
+    private static String normalizePinnedPreset(String value) {
+        return "top-left".equalsIgnoreCase(value) ? "top-left" : "top-right";
+    }
+
+    private static int clampInt(String value, int minimum, int maximum) {
+        try {
+            return clamp(Integer.parseInt(value.trim()), minimum, maximum);
+        } catch (Exception ignored) {
+            return minimum;
+        }
+    }
+
+    private static int clamp(int value, int minimum, int maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
     }
 
     private static int configVersion(Properties properties) {

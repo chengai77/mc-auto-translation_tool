@@ -1,0 +1,148 @@
+package org.universaltranslator.neoforge;
+
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.client.event.ClientChatEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.GameShuttingDownEvent;
+import net.neoforged.fml.loading.FMLPaths;
+import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.universaltranslator.core.TranslationResult;
+import org.universaltranslator.core.TranslationStatusLocalizer;
+
+public final class UniversalTranslatorNeoForgeClient {
+    private static final long FAILURE_NOTIFICATION_COOLDOWN_MILLIS = 60_000L;
+    private static final Logger LOGGER = LoggerFactory.getLogger("universal_translator");
+    private static final KeyMapping OPEN_SETTINGS = new KeyMapping("key.universal_translator.open_settings", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_U, KeyMapping.Category.MISC);
+    private static final KeyMapping TOGGLE_TRANSLATION = new KeyMapping("key.universal_translator.toggle_translation", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F8, KeyMapping.Category.MISC);
+    private static final KeyMapping OPEN_TRANSLATION_LOG = new KeyMapping("key.universal_translator.open_translation_log", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_I, KeyMapping.Category.MISC);
+    private static boolean connectedLastTick;
+    private static int joinHintTicks = -1;
+    private static String lastRuntimeStatus = "";
+    private static long nextFailureNotificationAt;
+
+    private UniversalTranslatorNeoForgeClient() { }
+
+    public static void register(IEventBus modBus) {
+        initializeRuntime();
+        modBus.addListener(UniversalTranslatorNeoForgeClient::registerKeyMappings);
+        NeoForge.EVENT_BUS.addListener(UniversalTranslatorNeoForgeClient::onClientTick);
+        NeoForge.EVENT_BUS.addListener(UniversalTranslatorNeoForgeClient::onClientChat);
+        NeoForge.EVENT_BUS.addListener(UniversalTranslatorNeoForgeClient::onGameShuttingDown);
+    }
+
+    private static void initializeRuntime() {
+        try {
+            NeoForgeConfig config = NeoForgeConfig.load(FMLPaths.CONFIGDIR.get());
+            NeoForgeTranslationRuntime.initialize(config);
+            LOGGER.info("MC Auto Translation Tool initialized; enabled={}", config.enabled);
+        } catch (Exception exception) {
+            LOGGER.error("MC Auto Translation Tool configuration failed", exception);
+            NeoForgeTranslationRuntime.shutdown();
+        }
+    }
+
+    private static void registerKeyMappings(RegisterKeyMappingsEvent event) { event.register(OPEN_SETTINGS); event.register(TOGGLE_TRANSLATION); event.register(OPEN_TRANSLATION_LOG); }
+
+    private static void onClientTick(ClientTickEvent.Post event) {
+        Minecraft client = Minecraft.getInstance();
+        NeoForgeTranslationRuntime.tickUrgentHudText();
+        boolean connected = client.level != null && client.getConnection() != null;
+        if (connected && !connectedLastTick) { TranslationLog.clear(); joinHintTicks = 60; } else if (!connected) joinHintTicks = -1;
+        connectedLastTick = connected;
+        if (connected && joinHintTicks > 0 && --joinHintTicks == 0) client.gui.getChat().addClientSystemMessage(Component.translatable("message.universal_translator.join_hint"));
+        while (TOGGLE_TRANSLATION.consumeClick()) toggleTranslation(client);
+        notifyRuntimeStatus(client, connected);
+        while (OPEN_TRANSLATION_LOG.consumeClick()) if (!(client.screen instanceof TranslationLogScreen)) client.setScreen(new TranslationLogScreen(client.screen));
+        while (OPEN_SETTINGS.consumeClick()) {
+            if (client.screen instanceof UniversalTranslatorConfigScreen) continue;
+            try { client.setScreen(new UniversalTranslatorConfigScreen(client.screen, NeoForgeConfig.load(FMLPaths.CONFIGDIR.get()))); }
+            catch (Exception exception) { LOGGER.error("Could not open settings", exception); }
+        }
+    }
+
+    private static void toggleTranslation(Minecraft client) {
+        NeoForgeConfig previous = null;
+        boolean runtimeChanged = false;
+        try {
+            previous = NeoForgeConfig.load(FMLPaths.CONFIGDIR.get());
+            NeoForgeConfig updated = previous.withEnabled(!previous.enabled);
+            if (updated.enabled) updated.validateProviderConfiguration();
+            runtimeChanged = true;
+            NeoForgeTranslationRuntime.initialize(updated);
+            lastRuntimeStatus = "";
+            nextFailureNotificationAt = 0L;
+            updated.save();
+            client.gui.setOverlayMessage(Component.translatable("message.universal_translator.toggle", Component.translatable(updated.enabled ? "value.universal_translator.enabled" : "value.universal_translator.disabled")), false);
+        } catch (Exception exception) { LOGGER.error("Could not toggle translation", exception); NeoForgeTranslationRuntime.showLocalOverlay(Component.translatable("message.universal_translator.toggle_failed"), false); }
+    }
+
+    private static void onClientChat(ClientChatEvent event) {
+        String message = event.getMessage();
+        if (!NeoForgeTranslationRuntime.shouldTranslateOutgoing(message)) return;
+        event.setCanceled(true);
+        Minecraft client = Minecraft.getInstance();
+        NeoForgeTranslationRuntime.showLocalOverlay(Component.translatable("message.universal_translator.outgoing_translating"), false);
+        NeoForgeTranslationRuntime.translateOutgoing(message).whenComplete((result, error) -> client.execute(() -> sendCompletedMessage(client, message, result, error)));
+    }
+
+    private static void sendCompletedMessage(Minecraft client, String original, TranslationResult result, Throwable error) {
+        if (client.getConnection() == null) {
+            client.gui.getChat().addClientSystemMessage(Component.translatable("message.universal_translator.outgoing_disconnected"));
+            return;
+        }
+        boolean failed = error != null || result == null || result.isFailure();
+        String outgoing = failed || !result.isTranslated() ? original : result.getTranslatedText();
+        boolean tooLong = outgoing.length() > 256;
+        if (tooLong) outgoing = original;
+        NeoForgeTranslationRuntime.protectOutgoingMessage(outgoing);
+        client.getConnection().sendChat(outgoing);
+        if (failed) {
+            client.gui.getChat().addClientSystemMessage(Component.translatable("message.universal_translator.outgoing_failed"));
+        } else if (tooLong) {
+            client.gui.getChat().addClientSystemMessage(Component.translatable("message.universal_translator.outgoing_too_long"));
+        }
+    }
+
+    private static void notifyRuntimeStatus(Minecraft client, boolean connected) {
+        String current = connected ? NeoForgeTranslationRuntime.status() : "";
+        if (current == null) current = "";
+        long now = System.currentTimeMillis();
+        boolean downloadProgress = TranslationStatusLocalizer.isDownloadProgress(current);
+        boolean changed = !current.equals(lastRuntimeStatus);
+        if (downloadProgress) {
+            lastRuntimeStatus = current;
+            return;
+        }
+        if (!changed) return;
+        lastRuntimeStatus = current;
+        if (current.isEmpty()) {
+            if (!connected) nextFailureNotificationAt = 0L;
+            return;
+        }
+        boolean failure = TranslationStatusLocalizer.isFailure(current);
+        String localized = TranslationStatusLocalizer.localize(current,
+                UniversalTranslatorNeoForgeClient::tr);
+        if (failure) {
+            if (now < nextFailureNotificationAt) return;
+            nextFailureNotificationAt = now + FAILURE_NOTIFICATION_COOLDOWN_MILLIS;
+            client.gui.getChat().addClientSystemMessage(Component.translatable("message.universal_translator.runtime_failed", localized));
+        } else if (client.screen == null) {
+            nextFailureNotificationAt = 0L;
+            client.gui.setOverlayMessage(Component.translatable("message.universal_translator.runtime_status", localized), false);
+        }
+    }
+
+    private static String tr(String key, Object... arguments) {
+        return Component.translatable(key, arguments).getString();
+    }
+
+    private static void onGameShuttingDown(GameShuttingDownEvent event) { NeoForgeTranslationRuntime.shutdown(); }
+}

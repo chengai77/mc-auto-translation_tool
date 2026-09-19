@@ -5,6 +5,8 @@ import com.mojang.math.Transformation;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.DisplayRenderer;
 import net.minecraft.client.renderer.entity.state.TextDisplayEntityRenderState;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Display;
 import org.joml.Vector3fc;
@@ -14,7 +16,9 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.universaltranslator.core.HologramLineWidth;
+import org.universaltranslator.core.HologramTextAlignment;
 import org.universaltranslator.core.HologramTopAnchor;
+import org.universaltranslator.core.PlayerFollowHologramTracker;
 import org.universaltranslator.fabric.HologramTextDisplayGroups;
 import org.universaltranslator.fabric.RenderedTextBridge;
 import org.universaltranslator.fabric.TextDisplayAnchorState;
@@ -26,6 +30,9 @@ import java.util.List;
 /** 完整翻译全息文本 */
 @Mixin(DisplayRenderer.TextDisplayRenderer.class)
 abstract class TextDisplayRendererMixin {
+    private static final PlayerFollowHologramTracker PLAYER_FOLLOW_TRACKER =
+            new PlayerFollowHologramTracker(2_048);
+    private static final float PLAYER_FOLLOW_UP_OFFSET = 0.25F;
     @Shadow
     private Display.TextDisplay.CachedInfo splitLines(Component text, int lineWidth) {
         throw new AssertionError();
@@ -43,6 +50,9 @@ abstract class TextDisplayRendererMixin {
         TextDisplayAnchorState anchorState = (TextDisplayAnchorState) state;
         anchorState.universalTranslator$setTopAnchorOffset(0.0F);
         anchorState.universalTranslator$setHorizontalOffset(0.0F);
+        PlayerFollowHologramTracker.Match playerFollow = detectPlayerFollow(entity);
+        anchorState.universalTranslator$setPlayerFollowHidden(
+                playerFollow.following() && playerFollow.localPlayer());
         Display.TextDisplay.TextRenderState source = state.textRenderState;
         if (source == null || source.text() == null) {
             return;
@@ -53,18 +63,26 @@ abstract class TextDisplayRendererMixin {
                 : state.renderState.transformation().get(state.interpolationProgress);
         Vector3fc localTranslation = transformation.translation();
         Vector3fc scale = transformation.scale();
-        HologramTextDisplayGroups.Result result = HologramTextDisplayGroups.translate(
-                System.identityHashCode(entity.level()),
-                entity.getId(), entity.getX(), entity.getY(), entity.getZ(),
-                state.entityYRot, state.entityXRot, orientationHash(transformation),
-                source.text(), localTranslation.x(), localTranslation.y(), scale.x(),
-                state.cachedInfo == null ? 0 : state.cachedInfo.width(),
-                alignment(source.flags()));
-        Component translated = result.text();
+        HologramTextDisplayGroups.Result result = playerFollow.following()
+                ? null
+                : HologramTextDisplayGroups.translate(
+                        System.identityHashCode(entity.level()),
+                        entity.getId(), entity.getX(), entity.getY(), entity.getZ(),
+                        state.entityYRot, state.entityXRot, orientationHash(transformation),
+                        source.text(), localTranslation.x(), localTranslation.y(), scale.x(),
+                        state.cachedInfo == null ? 0 : state.cachedInfo.width(),
+                        alignment(source.flags()));
+        Component translated = playerFollow.following()
+                ? RenderedTextBridge.translateHologramText(source.text())
+                : result.text();
         if (translated != source.text()) {
-            byte flags = result.centered() ? centeredFlags(source.flags()) : source.flags();
             String originalText = source.text().getString();
             String translatedText = translated.getString();
+            boolean centerShortPhrase = !playerFollow.following()
+                    && HologramTextAlignment.shouldCenter(originalText, translatedText);
+            byte flags = playerFollow.following()
+                    || (!result.centered() && !centerShortPhrase)
+                    ? source.flags() : centeredFlags(source.flags());
             int layoutLimit = HologramLineWidth.layoutLimit(
                     source.lineWidth(), originalText, translatedText);
             Display.TextDisplay.CachedInfo translatedLines =
@@ -78,11 +96,12 @@ abstract class TextDisplayRendererMixin {
                     source.backgroundColor(),
                     flags);
             state.cachedInfo = translatedLines;
-            if (!result.hidden()) {
-                anchorState.universalTranslator$setTopAnchorOffset(
-                        HologramTopAnchor.offset(originalLines, lineCount(state.cachedInfo)));
+            if (playerFollow.following() || !result.hidden()) {
+                anchorState.universalTranslator$setTopAnchorOffset(playerFollow.following()
+                        ? PLAYER_FOLLOW_UP_OFFSET
+                        : HologramTopAnchor.offset(originalLines, lineCount(state.cachedInfo)));
                 anchorState.universalTranslator$setHorizontalOffset(
-                        result.horizontalOffset());
+                        playerFollow.following() ? 0.0F : result.horizontalOffset());
             }
         }
         state.cachedInfo = bypassLines(state.cachedInfo);
@@ -92,7 +111,7 @@ abstract class TextDisplayRendererMixin {
             method = "submitInner(Lnet/minecraft/client/renderer/entity/state/TextDisplayEntityRenderState;"
                     + "Lcom/mojang/blaze3d/vertex/PoseStack;"
                     + "Lnet/minecraft/client/renderer/SubmitNodeCollector;IF)V",
-            at = @At("HEAD"))
+            at = @At("HEAD"), cancellable = true)
     private void universalTranslator$alignTranslatedTop(
             TextDisplayEntityRenderState state,
             PoseStack poseStack,
@@ -102,6 +121,11 @@ abstract class TextDisplayRendererMixin {
             CallbackInfo callback
     ) {
         TextDisplayAnchorState anchor = (TextDisplayAnchorState) state;
+        if (anchor.universalTranslator$isPlayerFollowHidden()
+                && Minecraft.getInstance().options.getCameraType().isFirstPerson()) {
+            callback.cancel();
+            return;
+        }
         float horizontal = anchor.universalTranslator$getHorizontalOffset();
         float vertical = anchor.universalTranslator$getTopAnchorOffset();
         if (horizontal != 0.0F || vertical != 0.0F) {
@@ -147,5 +171,46 @@ abstract class TextDisplayRendererMixin {
                     TranslationBypassText.wrap(line.contents()), line.width()));
         }
         return new Display.TextDisplay.CachedInfo(wrapped, lines.width());
+    }
+
+    private static PlayerFollowHologramTracker.Match detectPlayerFollow(
+            Display.TextDisplay entity) {
+        Minecraft client = Minecraft.getInstance();
+        long entityKey = trackingKey(entity.level(), entity);
+        Integer confirmedPlayerId = PLAYER_FOLLOW_TRACKER.confirmedPlayerId(entityKey);
+        AbstractClientPlayer nearest = null;
+        double nearestDistance = Double.MAX_VALUE;
+        if (client.level != null) {
+            for (AbstractClientPlayer player : client.level.players()) {
+                double dx = entity.getX() - player.getX();
+                double dz = entity.getZ() - player.getZ();
+                double dy = entity.getY() - player.getY();
+                double distance = dx * dx + dz * dz;
+                boolean trackedPlayer = confirmedPlayerId != null
+                        && confirmedPlayerId.intValue() == player.getId();
+                boolean nearby = trackedPlayer
+                        ? dy >= 0.8D && dy <= 4.2D && distance <= 1.44D
+                        : dy >= 1.2D && dy <= 3.8D && distance <= 0.36D;
+                if (nearby && (trackedPlayer || distance < nearestDistance)) {
+                    nearest = player;
+                    nearestDistance = distance;
+                    if (trackedPlayer) {
+                        break;
+                    }
+                }
+            }
+        }
+        if (nearest == null) {
+            return PLAYER_FOLLOW_TRACKER.miss(entityKey);
+        }
+        return PLAYER_FOLLOW_TRACKER.observe(
+                entityKey, nearest.getId(), nearest == client.player,
+                entity.getX(), entity.getY(), entity.getZ(),
+                nearest.getX(), nearest.getY(), nearest.getZ());
+    }
+
+    private static long trackingKey(Object world, Object entity) {
+        return ((long) System.identityHashCode(world) << 32)
+                ^ (System.identityHashCode(entity) & 0xffffffffL);
     }
 }

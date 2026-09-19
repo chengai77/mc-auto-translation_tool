@@ -312,6 +312,9 @@ final class LegacyConfigScreen extends GuiScreen {
                     width / 2, infoY + 15, 0xA0A0A0);
         }
         super.drawScreen(mouseX, mouseY, partialTicks);
+        String watermark = "由承挨二次开发";
+        drawString(renderer, watermark, Math.max(4, width - renderer.getStringWidth(watermark) - 6),
+                Math.max(4, height - 13), 0x88B0B0B0);
     }
 
     @Override

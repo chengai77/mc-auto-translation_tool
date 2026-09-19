@@ -3,12 +3,16 @@ package org.universaltranslator.core;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Iterator;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 
 /** 提示词上下文 */
 final class RecentTranslationContext {
-    private static final int MAX_ENTRIES = 8;
+    private static final int MAX_ENTRIES = 6;
     private static final int MAX_TEXT_LENGTH = 80;
-    private static final int MAX_SNAPSHOT_LENGTH = 480;
+    private static final int MAX_SNAPSHOT_LENGTH = 320;
+    private static final int MIN_CONTEXT_SOURCE_LENGTH = 12;
 
     private final Deque<Entry> entries = new ArrayDeque<Entry>();
 
@@ -26,20 +30,30 @@ final class RecentTranslationContext {
         }
     }
 
-    synchronized String snapshot(TextKind preferredKind) {
+    synchronized String snapshot(TextKind preferredKind, String currentSource) {
+        if (preferredKind == TextKind.CHAT || preferredKind == TextKind.SYSTEM_MESSAGE) {
+            return "";
+        }
+        if (currentSource == null || currentSource.trim().length() < MIN_CONTEXT_SOURCE_LENGTH) {
+            return "";
+        }
+        Set<String> currentTerms = significantTerms(clean(currentSource));
+        if (currentTerms.isEmpty()) {
+            return "";
+        }
         StringBuilder output = new StringBuilder(MAX_SNAPSHOT_LENGTH);
-        appendEntries(output, preferredKind, true);
-        appendEntries(output, preferredKind, false);
+        appendEntries(output, preferredKind, currentTerms);
         return output.length() > MAX_SNAPSHOT_LENGTH
                 ? output.substring(0, MAX_SNAPSHOT_LENGTH) : output.toString();
     }
 
-    private void appendEntries(StringBuilder output, TextKind preferredKind, boolean sameKindOnly) {
+    private void appendEntries(
+            StringBuilder output, TextKind preferredKind, Set<String> currentTerms) {
         Iterator<Entry> iterator = entries.iterator();
         while (iterator.hasNext() && output.length() < MAX_SNAPSHOT_LENGTH) {
             Entry entry = iterator.next();
-            boolean sameKind = preferredKind != null && preferredKind == entry.kind;
-            if (sameKindOnly != sameKind) {
+            if (preferredKind == null || preferredKind != entry.kind
+                    || !sharesTerm(currentTerms, entry.source)) {
                 continue;
             }
             if (output.length() > 0) {
@@ -47,6 +61,28 @@ final class RecentTranslationContext {
             }
             output.append(entry.source).append("=>").append(entry.translated);
         }
+    }
+
+    private static boolean sharesTerm(Set<String> currentTerms, String previousSource) {
+        for (String term : significantTerms(previousSource)) {
+            if (currentTerms.contains(term)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<String> significantTerms(String value) {
+        Set<String> terms = new HashSet<String>();
+        if (value == null || value.isEmpty()) {
+            return terms;
+        }
+        for (String term : value.toLowerCase(Locale.ROOT).split("[^a-z0-9_]+")) {
+            if (term.length() >= 3) {
+                terms.add(term);
+            }
+        }
+        return terms;
     }
 
     private void removeDuplicate(String source) {

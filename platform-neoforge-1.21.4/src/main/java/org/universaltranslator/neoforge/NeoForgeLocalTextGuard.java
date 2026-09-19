@@ -1,0 +1,81 @@
+package org.universaltranslator.neoforge;
+
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.widget.TextFieldWidget;
+import org.universaltranslator.core.TranslationTextStyling;
+
+import java.lang.reflect.Field;
+
+/** 本地输入识别 */
+final class NeoForgeLocalTextGuard {
+    private static volatile Field chatField;
+    private static volatile boolean searched;
+
+    private NeoForgeLocalTextGuard() {
+    }
+
+    static boolean isTranslatorScreen(MinecraftClient client) {
+        return client != null && client.currentScreen instanceof LocalTranslationScreen;
+    }
+
+    static boolean isLocalChatInput(MinecraftClient client, String rendered) {
+        if (client == null || !(client.currentScreen instanceof ChatScreen)
+                || rendered == null || rendered.isEmpty()) {
+            return false;
+        }
+        TextFieldWidget field = findChatField(client.currentScreen);
+        return field != null && matches(field.getText(), rendered);
+    }
+
+    private static TextFieldWidget findChatField(Screen screen) {
+        Field known = chatField;
+        if (!searched) {
+            synchronized (NeoForgeLocalTextGuard.class) {
+                if (!searched) {
+                    chatField = findTextField(screen.getClass());
+                    searched = true;
+                }
+                known = chatField;
+            }
+        }
+        if (known == null) {
+            return null;
+        }
+        try {
+            Object value = known.get(screen);
+            return value instanceof TextFieldWidget ? (TextFieldWidget) value : null;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static Field findTextField(Class<?> type) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Field field : current.getDeclaredFields()) {
+                if (TextFieldWidget.class.isAssignableFrom(field.getType())) {
+                    try {
+                        field.setAccessible(true);
+                        return field;
+                    } catch (RuntimeException ignored) {
+                        return null;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean matches(String typed, String rendered) {
+        if (typed == null || typed.isEmpty()) {
+            return false;
+        }
+        String visible = TranslationTextStyling.stripLegacyFormatting(rendered);
+        if (visible.equals(typed) || visible.equals(typed + "_")) {
+            return true;
+        }
+        return visible.length() >= 2 && typed.contains(visible);
+    }
+}
+

@@ -2,6 +2,7 @@ package org.universaltranslator.core.offline;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
@@ -140,5 +141,27 @@ public final class OfflineProcessSupport {
             return "离线引擎启动失败（退出码 " + code + "）：" + detail;
         }
         return "离线引擎启动失败（退出码 " + code + "），详细信息见 llama-server.log";
+    }
+
+    /** 识别本机离线服务断连 */
+    public static boolean isLoopbackConnectionFailure(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 8; depth++) {
+            if (current instanceof ConnectException) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null) {
+                String normalized = message.toLowerCase(Locale.ROOT);
+                if (normalized.contains("connection refused")
+                        || normalized.contains("getsockopt")
+                        || normalized.contains("failed to connect")
+                        || normalized.contains("connection reset")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

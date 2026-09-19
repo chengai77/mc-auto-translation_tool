@@ -39,7 +39,7 @@ public enum TranslationTextColor {
 
     public static TranslationTextColor fromConfig(String value) {
         if (value == null || value.trim().isEmpty()) {
-            return AQUA;
+            return ORIGINAL;
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
         for (TranslationTextColor color : values()) {

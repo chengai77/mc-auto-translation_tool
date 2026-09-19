@@ -28,6 +28,10 @@ public final class LegacyRenderContext {
         KINDS.get().push(TextKind.TOOLTIP);
     }
 
+    public static void pushSign() {
+        KINDS.get().push(TextKind.SIGN);
+    }
+
     /** 屏蔽本地输入 */
     public static void pushTextInput() {
         Integer depth = TEXT_INPUT_DEPTH.get();

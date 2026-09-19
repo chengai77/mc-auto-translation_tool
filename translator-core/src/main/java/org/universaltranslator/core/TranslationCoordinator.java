@@ -1,6 +1,5 @@
 package org.universaltranslator.core;
 
-import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CancellationException;
@@ -43,12 +42,14 @@ public final class TranslationCoordinator implements AutoCloseable {
     private final ConcurrentHashMap<String, CompletableFuture<TranslationResult>> inFlight =
             new ConcurrentHashMap<String, CompletableFuture<TranslationResult>>();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean providerClosed = new AtomicBoolean();
     private final AtomicInteger submissionSequence = new AtomicInteger();
     private final RecentTranslationContext recentContext = new RecentTranslationContext();
 
     public TranslationCoordinator(TranslationProvider provider, TranslationStore cache, int workerCount) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.cache = Objects.requireNonNull(cache, "cache");
+        TranslationCacheIdentity.registerProvider(cache, provider.id());
         if (workerCount < 1) {
             throw new IllegalArgumentException("workerCount must be positive");
         }
@@ -197,12 +198,24 @@ public final class TranslationCoordinator implements AutoCloseable {
                                             created.complete(TranslationResult.unchanged(text));
                                             return;
                                         }
+                                        String cached = cachedRestoredTranslation(
+                                                protectedText, sourceLanguage, targetLanguage,
+                                                kind, texturePlan, text);
+                                        if (cached != null) {
+                                            if (!contextKey.isEmpty()) {
+                                                putCached(renderedCacheIdentity(
+                                                        sourceLanguage, targetLanguage, kind,
+                                                        preserveHanText, contextKey, text), cached);
+                                            }
+                                            created.complete(TranslationResult.success(text, cached));
+                                            return;
+                                        }
                                         String translated = translateSegments(
                                                 protectedText, sourceLanguage, targetLanguage, kind);
                                         String restored = restoreDisplayText(
                                                 text, translated, targetLanguage, texturePlan);
                                         if (!contextKey.isEmpty()) {
-                                            cache.put(renderedCacheKey(
+                                            putCached(renderedCacheIdentity(
                                                     sourceLanguage, targetLanguage, kind,
                                                     preserveHanText, contextKey, text), restored);
                                         }
@@ -247,7 +260,7 @@ public final class TranslationCoordinator implements AutoCloseable {
         if (contextKey.isEmpty()) {
             return null;
         }
-        String translated = cache.get(renderedCacheKey(
+        String translated = getCached(renderedCacheIdentity(
                 sourceLanguage, targetLanguage, kind,
                 preserveHanText, contextKey, text));
         if (translated == null) {
@@ -313,7 +326,10 @@ public final class TranslationCoordinator implements AutoCloseable {
                         protectedText, sourceLanguage, targetLanguage, kind,
                         provider, cache, recentContext, CACHE_FORMAT_VERSION);
             } catch (StructuredTemplateTranslator.TemplateTranslationException invalidTemplate) {
-                if (!invalidTemplate.canFallbackToSegments()) {
+                // 全大写原文常被模型原样返回，回退分段后重试
+                boolean allCaps = LanguageHeuristics.normalizeAllCaps(
+                        protectedText.getUnprotectedTemplateText()) != null;
+                if (!invalidTemplate.canFallbackToSegments() && !allCaps) {
                     throw invalidTemplate;
                 }
                 logStructuredFallback(protectedText, kind);
@@ -377,6 +393,23 @@ public final class TranslationCoordinator implements AutoCloseable {
                 protectedText, sourceLanguage, targetLanguage, kind, preserveLines);
     }
 
+    private String cachedRestoredTranslation(
+            ProtectedText protectedText,
+            String sourceLanguage,
+            String targetLanguage,
+            TextKind kind,
+            InlineTextureCode.TranslationPlan texturePlan,
+            String source
+    ) {
+        try {
+            String translated = translateCachedSegments(
+                    protectedText, sourceLanguage, targetLanguage, kind);
+            return restoreDisplayText(source, translated, targetLanguage, texturePlan);
+        } catch (RuntimeException missingOrInvalidCache) {
+            return null;
+        }
+    }
+
     private String translateCachedLocalSegments(
             ProtectedText protectedText,
             String sourceLanguage,
@@ -438,7 +471,10 @@ public final class TranslationCoordinator implements AutoCloseable {
                         block, sourceLanguage, targetLanguage, kind,
                         provider, cache, recentContext, CACHE_FORMAT_VERSION));
             } catch (StructuredTemplateTranslator.TemplateTranslationException invalidTemplate) {
-                if (!invalidTemplate.canFallbackToSegments()) {
+                // 全大写原文常被模型原样返回，回退分段后重试
+                boolean allCaps = LanguageHeuristics.normalizeAllCaps(
+                        block.getUnprotectedTemplateText()) != null;
+                if (!invalidTemplate.canFallbackToSegments() && !allCaps) {
                     throw invalidTemplate;
                 }
                 logStructuredFallback(block, kind);
@@ -452,8 +488,8 @@ public final class TranslationCoordinator implements AutoCloseable {
         }
         restored = LocalizedNumericGrammar.normalize(
                 protectedText.getOriginal(), restored, targetLanguage);
-        cache.put(hologramBatchCacheKey(
-                provider.id(), sourceLanguage, targetLanguage, protectedText.getOriginal()), restored);
+        putCached(hologramBatchCacheIdentity(
+                sourceLanguage, targetLanguage, protectedText.getOriginal()), restored);
         recentContext.remember(protectedText.getOriginal(), restored, kind);
         return restored;
     }
@@ -464,8 +500,8 @@ public final class TranslationCoordinator implements AutoCloseable {
             String targetLanguage,
             TextKind kind
     ) {
-        String aggregate = cache.get(hologramBatchCacheKey(
-                provider.id(), sourceLanguage, targetLanguage, protectedText.getOriginal()));
+        String aggregate = getCached(hologramBatchCacheIdentity(
+                sourceLanguage, targetLanguage, protectedText.getOriginal()));
         if (aggregate != null) {
             try {
                 aggregate = LocalizedNumericGrammar.normalize(
@@ -504,8 +540,8 @@ public final class TranslationCoordinator implements AutoCloseable {
         }
         restored = LocalizedNumericGrammar.normalize(
                 protectedText.getOriginal(), restored, targetLanguage);
-        cache.put(hologramBatchCacheKey(
-                provider.id(), sourceLanguage, targetLanguage, protectedText.getOriginal()), restored);
+        putCached(hologramBatchCacheIdentity(
+                sourceLanguage, targetLanguage, protectedText.getOriginal()), restored);
         recentContext.remember(protectedText.getOriginal(), restored, kind);
         return restored;
     }
@@ -522,14 +558,13 @@ public final class TranslationCoordinator implements AutoCloseable {
         return ProtectedText.parse(content, matchingValues, false);
     }
 
-    private static String hologramBatchCacheKey(
-            String providerId, String sourceLanguage, String targetLanguage, String source) {
-        return CACHE_FORMAT_VERSION + "\n" + providerId
-                + "\n" + sourceLanguage + "\n" + targetLanguage
+    private static String hologramBatchCacheIdentity(
+            String sourceLanguage, String targetLanguage, String source) {
+        return sourceLanguage + "\n" + targetLanguage
                 + "\nhologram-batch\n" + source;
     }
 
-    private String renderedCacheKey(
+    private static String renderedCacheIdentity(
             String sourceLanguage,
             String targetLanguage,
             TextKind kind,
@@ -537,8 +572,7 @@ public final class TranslationCoordinator implements AutoCloseable {
             String protectedContextKey,
             String source
     ) {
-        return CACHE_FORMAT_VERSION + "\n" + provider.id()
-                + "\n" + sourceLanguage + "\n" + targetLanguage
+        return sourceLanguage + "\n" + targetLanguage
                 + "\n" + kind + "\n" + preserveHanText
                 + "\nrendered\n" + protectedContextKey + "\n" + source;
     }
@@ -579,9 +613,9 @@ public final class TranslationCoordinator implements AutoCloseable {
             recentContext.remember(core, exact, kind);
             return segment.substring(0, start) + exact + segment.substring(end);
         }
-        String cacheKey = CACHE_FORMAT_VERSION + "\n" + provider.id()
-                + "\n" + sourceLanguage + "\n" + targetLanguage + "\n" + core;
-        String translated = cache.get(cacheKey);
+        String cacheIdentity =
+                sourceLanguage + "\n" + targetLanguage + "\n" + core;
+        String translated = getCached(cacheIdentity);
         if (translated != null) {
             try {
                 translated = TranslationOutputValidator.requireValid(
@@ -593,7 +627,7 @@ public final class TranslationCoordinator implements AutoCloseable {
         if (translated == null) {
             translated = requestValidatedTranslation(core, core, sourceLanguage, targetLanguage, kind);
             if (translated == null) {
-                String normalized = normalizeAllCapsCore(core);
+                String normalized = LanguageHeuristics.normalizeAllCaps(core);
                 if (normalized != null) {
                     translated = requestValidatedTranslation(normalized, core, sourceLanguage, targetLanguage, kind);
                 }
@@ -602,7 +636,7 @@ public final class TranslationCoordinator implements AutoCloseable {
                 throw TranslationOutputValidator.invalidOutput(
                         "Provider returned no valid translation");
             }
-            cache.put(cacheKey, translated);
+            putCached(cacheIdentity, translated);
         }
         recentContext.remember(core, translated, kind);
         return segment.substring(0, start) + translated + segment.substring(end);
@@ -615,7 +649,7 @@ public final class TranslationCoordinator implements AutoCloseable {
             String targetLanguage,
             TextKind kind
     ) throws Exception {
-        String contextHint = recentContext.snapshot(kind);
+        String contextHint = recentContext.snapshot(kind, requestText);
         for (int attempt = 0; attempt < 2; attempt++) {
             String translated;
             try {
@@ -640,26 +674,6 @@ public final class TranslationCoordinator implements AutoCloseable {
             }
         }
         return null;
-    }
-
-    private static String normalizeAllCapsCore(String core) {
-        boolean hasLetter = false;
-        boolean hasLowerCase = false;
-        for (int i = 0; i < core.length(); i++) {
-            char ch = core.charAt(i);
-            if (Character.isLetter(ch)) {
-                hasLetter = true;
-                if (Character.isLowerCase(ch)) {
-                    hasLowerCase = true;
-                    break;
-                }
-            }
-        }
-        if (!hasLetter || hasLowerCase) {
-            return null;
-        }
-        String lower = core.toLowerCase(Locale.ROOT);
-        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
     }
 
     private String translateCachedSegment(
@@ -698,9 +712,8 @@ public final class TranslationCoordinator implements AutoCloseable {
             recentContext.remember(core, exact, kind);
             return segment.substring(0, start) + exact + segment.substring(end);
         }
-        String cacheKey = CACHE_FORMAT_VERSION + "\n" + provider.id()
-                + "\n" + sourceLanguage + "\n" + targetLanguage + "\n" + core;
-        String translated = cache.get(cacheKey);
+        String translated = getCached(
+                sourceLanguage + "\n" + targetLanguage + "\n" + core);
         if (translated == null) {
             throw new IllegalStateException("Cached translation is missing");
         }
@@ -708,6 +721,16 @@ public final class TranslationCoordinator implements AutoCloseable {
                 core, translated, targetLanguage);
         recentContext.remember(core, translated, kind);
         return segment.substring(0, start) + translated + segment.substring(end);
+    }
+
+    private String getCached(String identity) {
+        return TranslationCacheIdentity.get(
+                cache, provider.id(), CACHE_FORMAT_VERSION, identity);
+    }
+
+    private void putCached(String identity, String value) {
+        TranslationCacheIdentity.put(
+                cache, CACHE_FORMAT_VERSION, identity, value);
     }
 
     private static String normalizeLocalizedOutput(String translated, String targetLanguage) {
@@ -745,6 +768,19 @@ public final class TranslationCoordinator implements AutoCloseable {
 
     @Override
     public void close() {
+        stopWork();
+        if (!providerClosed.compareAndSet(false, true)) {
+            return;
+        }
+        closeProvider();
+    }
+
+    /** 只停止翻译任务，不在调用线程关闭网络或本地模型 provider。 */
+    public void deactivate() {
+        stopWork();
+    }
+
+    private void stopWork() {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
@@ -766,6 +802,9 @@ public final class TranslationCoordinator implements AutoCloseable {
         if (dedicatedSystemExecutor) {
             systemExecutor.shutdownNow();
         }
+    }
+
+    private void closeProvider() {
         if (provider instanceof AutoCloseable) {
             try {
                 ((AutoCloseable) provider).close();

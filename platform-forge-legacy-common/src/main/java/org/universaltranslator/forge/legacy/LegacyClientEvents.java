@@ -5,6 +5,7 @@ import net.minecraft.client.resources.I18n;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.client.event.GuiScreenEvent;
+import net.minecraftforge.client.event.RenderGameOverlayEvent;
 import net.minecraftforge.fml.client.registry.ClientRegistry;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
@@ -17,17 +18,21 @@ import java.io.File;
 /** 按键与设置入口 */
 public final class LegacyClientEvents {
     private static final long FAILURE_NOTIFICATION_COOLDOWN_MILLIS = 60_000L;
+    private static final long TOGGLE_NOTIFICATION_MILLIS = 3_000L;
     private static final LegacyClientEvents INSTANCE = new LegacyClientEvents();
     private static final KeyBinding OPEN_SETTINGS = new KeyBinding(
             "key.universal_translator.open_settings", Keyboard.KEY_U, "MC Auto Translation Tool");
     private static final KeyBinding TOGGLE_TRANSLATION = new KeyBinding(
             "key.universal_translator.toggle_translation", Keyboard.KEY_F8, "MC Auto Translation Tool");
+    private static final KeyBinding OPEN_TRANSLATION_LOG = new KeyBinding(
+            "key.universal_translator.open_translation_log", Keyboard.KEY_I, "MC Auto Translation Tool");
     private static File configDirectory;
     private static boolean registered;
     private boolean connectedLastTick;
     private int joinHintTicks = -1;
     private String lastRuntimeStatus = "";
     private long nextFailureNotificationAt;
+    private long runtimeNotificationPausedUntil;
 
     private LegacyClientEvents() {
     }
@@ -37,6 +42,7 @@ public final class LegacyClientEvents {
         if (!registered) {
             ClientRegistry.registerKeyBinding(OPEN_SETTINGS);
             ClientRegistry.registerKeyBinding(TOGGLE_TRANSLATION);
+            ClientRegistry.registerKeyBinding(OPEN_TRANSLATION_LOG);
             MinecraftForge.EVENT_BUS.register(INSTANCE);
             registered = true;
         }
@@ -54,7 +60,6 @@ public final class LegacyClientEvents {
             return;
         }
         if (!LegacyTranslationRuntime.shouldTranslateOutgoing(message)) {
-            LegacyTranslationRuntime.protectOutgoingMessage(message);
             return;
         }
         event.setCanceled(true);
@@ -62,11 +67,14 @@ public final class LegacyClientEvents {
         LegacyVersionAccess.rememberSentMessage(minecraft, message);
         minecraft.displayGuiScreen(null);
         minecraft.setIngameFocus();
-        minecraft.ingameGUI.setRecordPlayingMessage(
-                tr("message.universal_translator.outgoing_translating"));
+        LegacyTranslationRuntime.showLocalOverlay(minecraft,
+                tr("message.universal_translator.outgoing_translating"), false);
         LegacyTranslationRuntime.translateOutgoing(message).whenComplete((result, error) ->
-                minecraft.addScheduledTask(() -> sendCompletedMessage(
-                        minecraft, message, result, error)));
+                minecraft.addScheduledTask(() -> {
+                    if (LegacyTranslationRuntime.shouldCompleteOutgoing()) {
+                        sendCompletedMessage(minecraft, message, result, error);
+                    }
+                }));
     }
 
     @SubscribeEvent
@@ -75,8 +83,10 @@ public final class LegacyClientEvents {
             return;
         }
         Minecraft minecraft = Minecraft.getMinecraft();
+        LegacyTranslationRuntime.tickUrgentHudText();
         boolean connected = LegacyVersionAccess.connection(minecraft) != null;
         if (connected && !connectedLastTick) {
+            LegacyTranslationLog.clear();
             joinHintTicks = 60;
         } else if (!connected) {
             joinHintTicks = -1;
@@ -105,10 +115,12 @@ public final class LegacyClientEvents {
                 lastRuntimeStatus = "";
                 nextFailureNotificationAt = 0L;
                 updated.save();
-                minecraft.ingameGUI.setRecordPlayingMessage(
+                runtimeNotificationPausedUntil =
+                        System.currentTimeMillis() + TOGGLE_NOTIFICATION_MILLIS;
+                LegacyTranslationRuntime.showLocalOverlay(minecraft,
                         tr("message.universal_translator.toggle", tr(updated.enabled
                                 ? "value.universal_translator.enabled"
-                                : "value.universal_translator.disabled")));
+                                : "value.universal_translator.disabled")), false);
             } catch (Exception exception) {
                 if (runtimeChanged && previous != null) {
                     try {
@@ -118,9 +130,16 @@ public final class LegacyClientEvents {
                     }
                 }
                 System.err.println("[MC Auto Translation Tool] Could not toggle translation: " + exception);
+                LegacyTranslationRuntime.showLocalOverlay(minecraft,
+                        tr("message.universal_translator.toggle_failed"), false);
             }
         }
         notifyRuntimeStatus(minecraft, connected);
+        if (OPEN_TRANSLATION_LOG.isPressed()) {
+            if (!(minecraft.currentScreen instanceof LegacyTranslationLogScreen)) {
+                minecraft.displayGuiScreen(new LegacyTranslationLogScreen(minecraft.currentScreen));
+            }
+        }
         if (!OPEN_SETTINGS.isPressed()) {
             return;
         }
@@ -140,7 +159,18 @@ public final class LegacyClientEvents {
         if (current == null) {
             current = "";
         }
-        if (current.equals(lastRuntimeStatus)) {
+        long now = System.currentTimeMillis();
+        boolean downloadProgress = TranslationStatusLocalizer.isDownloadProgress(current);
+        boolean changed = !current.equals(lastRuntimeStatus);
+        if (downloadProgress) {
+            lastRuntimeStatus = current;
+            return;
+        }
+        if (!changed) {
+            return;
+        }
+        boolean failure = isFailureStatus(current);
+        if (!failure && now < runtimeNotificationPausedUntil) {
             return;
         }
         lastRuntimeStatus = current;
@@ -148,9 +178,11 @@ public final class LegacyClientEvents {
             nextFailureNotificationAt = 0L;
             return;
         }
+        if (!failure && minecraft.currentScreen != null) {
+            return;
+        }
         String localized = TranslationStatusLocalizer.localize(current, LegacyClientEvents::tr);
-        if (isFailureStatus(current)) {
-            long now = System.currentTimeMillis();
+        if (failure) {
             if (now < nextFailureNotificationAt) {
                 return;
             }
@@ -159,9 +191,36 @@ public final class LegacyClientEvents {
                     tr("message.universal_translator.runtime_failed", localized));
         } else {
             nextFailureNotificationAt = 0L;
-            minecraft.ingameGUI.setRecordPlayingMessage(
-                    tr("message.universal_translator.runtime_status", localized));
+            LegacyTranslationRuntime.showLocalOverlay(minecraft,
+                    tr("message.universal_translator.runtime_status", localized), false);
         }
+    }
+
+    @SubscribeEvent
+    public void onDownloadStatusOverlay(RenderGameOverlayEvent.Text event) {
+        Minecraft minecraft = Minecraft.getMinecraft();
+        if (minecraft.currentScreen != null || minecraft.gameSettings.hideGUI) {
+            return;
+        }
+        TranslationStatusLocalizer.DownloadProgressDisplay display =
+                TranslationStatusLocalizer.downloadProgressDisplay(
+                        LegacyTranslationRuntime.status(), LegacyClientEvents::tr);
+        if (display == null) {
+            LegacyTranslationLogOverlay.render(minecraft);
+            return;
+        }
+        net.minecraft.client.gui.FontRenderer renderer = LegacyVersionAccess.fontRenderer();
+        int center = LegacyVersionAccess.scaledWidth(minecraft) / 2;
+        int y = LegacyVersionAccess.scaledHeight(minecraft) - 94;
+        drawCentered(renderer, tr("message.universal_translator.runtime_title"), center, y);
+        drawCentered(renderer, display.progress(), center, y + 11);
+        drawCentered(renderer, display.size(), center, y + 22);
+        LegacyTranslationLogOverlay.render(minecraft);
+    }
+
+    private static void drawCentered(
+            net.minecraft.client.gui.FontRenderer renderer, String value, int center, int y) {
+        renderer.drawStringWithShadow(value, center - renderer.getStringWidth(value) / 2.0F, y, 0xFFFFFF);
     }
 
     private static boolean isFailureStatus(String status) {

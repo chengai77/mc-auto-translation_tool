@@ -2,9 +2,20 @@
 
 [简体中文](../Zh-cn/BUILDING.md) · [繁體中文](../Zh-tw/BUILDING.md) · [English](BUILDING.md) · [Back to English README](README.md)
 
-The project consists of one shared Java 8 core, three modern Fabric modules, and two independent
-legacy Forge builds. Legacy ForgeGradle cannot run directly on modern JDKs, so one root Gradle
-command cannot build every version.
+The project consists of one shared Java 8 core, nine modern Fabric modules, one 1.16.5 Fabric
+module, and two independent legacy Forge builds. Legacy ForgeGradle cannot run directly on modern
+JDKs, so one root Gradle command cannot build every version.
+
+## Fabric 26.3
+
+JDK 25 or later is required:
+
+```bash
+./gradlew :platform-fabric-26.3:build
+```
+
+Output is written to `platform-fabric-26.3/build/libs/`. This version is Fabric-only; there is no
+matching Forge/NeoForge project.
 
 ## Fabric 26.2
 
@@ -35,6 +46,29 @@ JDK 21 or later is required:
 ```
 
 Output is written to `platform-fabric-1.21.11/build/libs/`.
+
+## Fabric 1.21.10
+
+JDK 21 or later is required:
+
+```bash
+./gradlew :platform-fabric-1.21.10:build
+```
+
+Output is written to `platform-fabric-1.21.10/build/libs/`.
+
+## Fabric 1.16.5
+
+Java 8 is the compilation target; the local launch check also ran on Java 8:
+
+```bash
+./gradlew :platform-fabric-1.16.5:build
+```
+
+Output is written to `platform-fabric-1.16.5/build/libs/`. This version uses legacy Loom with a
+single `src/main` source set (1.16.5 has no separate server JAR, so `splitEnvironmentSourceSets()`
+cannot be used) and is Fabric-only. Note that the Fabric API mod id in the 1.16.5 era is `fabric`,
+not `fabric-api`, so `fabric.mod.json` must declare that dependency accordingly.
 
 ## Forge 1.12.2
 

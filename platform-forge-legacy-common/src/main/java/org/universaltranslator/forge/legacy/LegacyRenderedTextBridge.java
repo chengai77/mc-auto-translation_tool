@@ -16,8 +16,13 @@ public final class LegacyRenderedTextBridge {
     }
 
     public static String translate(String text) {
-        if (LegacyRenderContext.isTextInput()) {
+        if (LegacyRenderContext.isTextInput()
+                || LegacySignTranslationContext.isMeasuring()) {
             return text;
+        }
+        String signTranslation = LegacySignTranslationContext.translateLine(text);
+        if (signTranslation != null) {
+            return style(text, signTranslation);
         }
         if (LegacyRenderContext.current() == TextKind.CHAT) {
             return text;
@@ -29,12 +34,35 @@ public final class LegacyRenderedTextBridge {
         return translate(text, TextKind.CHAT);
     }
 
+    public static String translateItemName(String text) {
+        return translate(text, TextKind.ITEM_NAME);
+    }
+
+    public static boolean preloadTitle(
+            String title,
+            String subtitle,
+            int fadeIn,
+            int stay,
+            int fadeOut
+    ) {
+        return LegacyTranslationRuntime.preloadTitle(
+                title, subtitle, fadeIn, stay, fadeOut);
+    }
+
+    public static boolean preloadOverlay(String text, boolean tinted) {
+        return LegacyTranslationRuntime.preloadOverlay(text, tinted);
+    }
+
     private static String translate(String text, TextKind kind) {
         if (text == null) {
             return null;
         }
         String translated = LegacyTranslationRuntime.translate(text, kind);
-        if (text.equals(translated)) {
+        return style(text, translated);
+    }
+
+    private static String style(String text, String translated) {
+        if (text == null || text.equals(translated)) {
             return text;
         }
         return TranslationTextStyling.applyTranslatedStyle(

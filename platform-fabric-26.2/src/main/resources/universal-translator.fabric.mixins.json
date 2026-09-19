@@ -16,6 +16,7 @@
     "TextDisplayRendererMixin",
     "TextRendererMixin",
     "GuiMessageMixin",
+    "ChatComponentAccessor",
     "SignRendererContextMixin",
     "InGameHudContextMixin",
     "BossBarHudContextMixin"

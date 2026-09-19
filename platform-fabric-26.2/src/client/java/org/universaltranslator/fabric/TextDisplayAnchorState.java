@@ -8,4 +8,8 @@ public interface TextDisplayAnchorState {
     float universalTranslator$getHorizontalOffset();
 
     void universalTranslator$setHorizontalOffset(float offset);
+
+    boolean universalTranslator$isPlayerFollowHidden();
+
+    void universalTranslator$setPlayerFollowHidden(boolean hidden);
 }

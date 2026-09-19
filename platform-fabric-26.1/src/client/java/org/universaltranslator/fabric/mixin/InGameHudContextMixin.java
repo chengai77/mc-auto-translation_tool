@@ -12,6 +12,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.universaltranslator.core.TextKind;
 import org.universaltranslator.fabric.RenderedTextBridge;
+import org.universaltranslator.fabric.DownloadStatusOverlay;
 import org.universaltranslator.fabric.TranslationLogOverlay;
 import org.universaltranslator.fabric.TranslationRenderContext;
 
@@ -81,10 +82,26 @@ abstract class InGameHudContextMixin {
         TranslationRenderContext.pop();
     }
 
-    @Inject(method = "setOverlayMessage", at = @At("HEAD"))
+    @Inject(method = "setTitle", at = @At("HEAD"), cancellable = true)
+    private void universalTranslator$preloadTitle(Component title, CallbackInfo callback) {
+        if (RenderedTextBridge.preloadUrgentHudText(title, TextKind.TITLE, false)) {
+            callback.cancel();
+        }
+    }
+
+    @Inject(method = "setSubtitle", at = @At("HEAD"), cancellable = true)
+    private void universalTranslator$preloadSubtitle(Component subtitle, CallbackInfo callback) {
+        if (RenderedTextBridge.preloadUrgentHudText(subtitle, TextKind.SUBTITLE, false)) {
+            callback.cancel();
+        }
+    }
+
+    @Inject(method = "setOverlayMessage", at = @At("HEAD"), cancellable = true)
     private void universalTranslator$preloadActionBar(
             Component message, boolean tinted, CallbackInfo callback) {
-        RenderedTextBridge.preloadUrgentHudText(message, TextKind.ITEM_NAME, tinted);
+        if (RenderedTextBridge.preloadUrgentHudText(message, TextKind.ACTION_BAR, tinted)) {
+            callback.cancel();
+        }
     }
 
     @Inject(
@@ -92,7 +109,7 @@ abstract class InGameHudContextMixin {
             at = @At("HEAD"))
     private void universalTranslator$enterItemNameOverlay(
             GuiGraphicsExtractor graphics, DeltaTracker deltaTracker, CallbackInfo callback) {
-        TranslationRenderContext.push(TextKind.ITEM_NAME);
+        TranslationRenderContext.push(TextKind.ACTION_BAR);
     }
 
     @Inject(
@@ -102,6 +119,7 @@ abstract class InGameHudContextMixin {
             GuiGraphicsExtractor graphics, DeltaTracker deltaTracker, CallbackInfo callback) {
         TranslationRenderContext.pop();
         TranslationLogOverlay.extract(graphics);
+        DownloadStatusOverlay.extract(graphics);
     }
 
     @Redirect(

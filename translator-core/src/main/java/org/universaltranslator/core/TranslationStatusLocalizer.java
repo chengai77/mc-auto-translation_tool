@@ -84,7 +84,39 @@ public final class TranslationStatusLocalizer {
                 || value.startsWith("正在下载离线模型：");
     }
 
+    public static DownloadProgressDisplay downloadProgressDisplay(
+            String status, UiTranslator translator) {
+        String value = status == null ? "" : status.trim();
+        if (!isDownloadProgress(value)) {
+            return null;
+        }
+        int metricStart = value.lastIndexOf('（');
+        int metricEnd = value.endsWith("）") ? value.length() - 1 : -1;
+        String progressStatus = metricStart >= 0 ? value.substring(0, metricStart) : value;
+        String size = metricStart >= 0 && metricEnd > metricStart
+                ? value.substring(metricStart + 1, metricEnd).trim() : "";
+        return new DownloadProgressDisplay(localize(progressStatus, translator), size);
+    }
+
     private static String normalizeMetrics(String value) {
         return value.replace('（', '(').replace('）', ')').trim();
+    }
+
+    public static final class DownloadProgressDisplay {
+        private final String progress;
+        private final String size;
+
+        private DownloadProgressDisplay(String progress, String size) {
+            this.progress = progress;
+            this.size = size;
+        }
+
+        public String progress() {
+            return progress;
+        }
+
+        public String size() {
+            return size;
+        }
     }
 }

@@ -76,7 +76,9 @@ final class LocalizedNumericGrammar {
         String output = translatedTemplate;
         NumericTranslationContext context = NumericTranslationContext.of(source);
         for (NumericTranslationContext.Entry entry : context.entries()) {
-            if (entry.likelyCount()) {
+            if (entry.effectLevel()) {
+                output = normalizeTemplateEffectLevel(source, output, entry);
+            } else if (entry.likelyCount()) {
                 output = normalizeTemplateCount(
                         source, output, entry, targetLanguage);
             }
@@ -100,7 +102,9 @@ final class LocalizedNumericGrammar {
             if (valueCounts.get(entry.value()).intValue() != 1) {
                 continue;
             }
-            if (entry.likelyCount()) {
+            if (entry.effectLevel()) {
+                output = normalizeDisplayEffectLevel(output, entry.value());
+            } else if (entry.likelyCount()) {
                 output = normalizeDisplayCount(output, entry.value(), targetLanguage);
             }
             if (entry.completionPercentage()) {
@@ -131,6 +135,54 @@ final class LocalizedNumericGrammar {
         int anchor = uniqueAnchor(projection.text());
         return anchor < 0 ? translated : normalizePercentage(
                 translated, projection, anchor, anchor + 1);
+    }
+
+    private static String normalizeTemplateEffectLevel(
+            ProtectedText source,
+            String translated,
+            NumericTranslationContext.Entry entry
+    ) {
+        Projection projection = Projection.template(source, translated, entry.token());
+        int anchor = uniqueAnchor(projection.text());
+        return anchor < 0 ? translated : normalizeEffectLevel(
+                translated, projection, anchor + 1);
+    }
+
+    private static String normalizeDisplayEffectLevel(String translated, String value) {
+        Projection projection = Projection.display(translated);
+        Range anchor = uniqueValue(projection.text(), value);
+        return anchor == null ? translated : normalizeEffectLevel(
+                translated, projection, anchor.end);
+    }
+
+    private static String normalizeEffectLevel(
+            String raw,
+            Projection projection,
+            int numberEnd
+    ) {
+        String visible = projection.text();
+        int next = nextContent(visible, numberEnd);
+        if (next < 0) {
+            return raw;
+        }
+        String tail = visible.substring(next, Math.min(visible.length(), next + 12));
+        if (tail.startsWith("级") || tail.startsWith("級")
+                || tail.startsWith("等级") || tail.startsWith("等級")) {
+            return raw;
+        }
+        int rawNumberEnd = projection.rawEnd(numberEnd);
+        if (tail.startsWith("个效果") || tail.startsWith("個效果")) {
+            return raw.substring(0, rawNumberEnd) + "级"
+                    + raw.substring(projection.rawEnd(next + 1));
+        }
+        if (tail.startsWith("效果") || tail.startsWith("状态效果")
+                || tail.startsWith("狀態效果")) {
+            return raw.substring(0, rawNumberEnd) + "级"
+                    + removeHorizontalWhitespace(
+                    raw.substring(rawNumberEnd, projection.rawStart(next)))
+                    + raw.substring(projection.rawStart(next));
+        }
+        return raw;
     }
 
     private static String normalizeDisplayCount(

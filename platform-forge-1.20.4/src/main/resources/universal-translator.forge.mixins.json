@@ -1,0 +1,29 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.universaltranslator.forge.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "client": [
+    "ChatInputSuggestorMixin",
+    "DebugHudMixin",
+    "ForgeGuiDebugTextMixin",
+    "BookEditBoxMixin",
+    "BookScreenMixin",
+    "DrawContextMixin",
+    "EntityNameRenderStateMixin",
+    "ScreenMixin",
+    "SignEditScreenMixin",
+    "TextFieldWidgetMixin",
+    "TextDisplayRendererMixin",
+    "TextRendererMixin",
+    "ChatHudMixin",
+    "ChatHudAccessor",
+    "SignRendererContextMixin",
+    "InGameHudContextMixin",
+    "BossBarHudContextMixin",
+    "PlayerListHudContextMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

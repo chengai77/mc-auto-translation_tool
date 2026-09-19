@@ -39,7 +39,7 @@ public final class TranslationRequest {
         this.targetLanguage = Objects.requireNonNull(targetLanguage, "targetLanguage");
         this.kind = kind == null ? TextKind.OTHER : kind;
         this.contextHint = contextHint == null ? "" : contextHint.trim();
-        this.glossaryHint = GameTranslationHints.glossaryFor(this.targetLanguage);
+        this.glossaryHint = GameTranslationHints.glossaryFor(this.text, this.targetLanguage);
         this.numericHint = numericHint == null ? "" : numericHint.trim();
     }
 

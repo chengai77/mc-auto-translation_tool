@@ -38,6 +38,10 @@ final class NumericTranslationContext {
                     "niveau", "étape", "etape", "chapitre", "version", "salle", "vague",
                     "nivel", "etapa", "capítulo", "capitulo", "sala", "ola",
                     "stufe", "kapitel", "raum", "welle")));
+    private static final Set<String> EFFECT_CUES = Collections.unmodifiableSet(
+            new HashSet<String>(Arrays.asList(
+                    "effect", "effects", "buff", "buffs", "debuff", "debuffs",
+                    "effet", "effets", "efecto", "efectos", "effekt", "effekte")));
 
     private final List<Entry> entries;
 
@@ -59,15 +63,17 @@ final class NumericTranslationContext {
             String token = token(index);
             String visible = visibleTemplate(protectedText, token);
             int anchor = visible.indexOf(ANCHOR);
+            boolean effectLevel = kind == Kind.PLAIN_NUMBER
+                    && anchor >= 0 && effectLevel(visible, anchor);
             boolean likelyCount = kind == Kind.PLAIN_NUMBER
-                    && anchor >= 0 && likelyCount(visible, anchor);
+                    && anchor >= 0 && !effectLevel && likelyCount(visible, anchor);
             boolean completionPercentage = kind == Kind.PERCENTAGE
                     && anchor >= 0 && completionPercentage(visible, anchor);
-            boolean wholeSentence = kind == Kind.PERCENTAGE || likelyCount
+            boolean wholeSentence = kind == Kind.PERCENTAGE || likelyCount || effectLevel
                     || (kind == Kind.NUMBER_WITH_UNIT
                     && anchor >= 0 && hasWordAfter(visible, anchor + 1));
             entries.add(new Entry(
-                    token, values.get(index), kind, likelyCount,
+                    token, values.get(index), kind, likelyCount, effectLevel,
                     completionPercentage, wholeSentence,
                     sourceWindow(protectedText.getTemplate(), token)));
         }
@@ -98,6 +104,9 @@ final class NumericTranslationContext {
             if (entry.likelyCount()) {
                 output.append("; role=count_or_measurement");
             }
+            if (entry.effectLevel()) {
+                output.append("; role=status_effect_level");
+            }
             if (entry.completionPercentage()) {
                 output.append("; role=completion_percentage");
             }
@@ -109,6 +118,7 @@ final class NumericTranslationContext {
         if (TargetLanguage.isSimplifiedChinese(targetLanguage)
                 || TargetLanguage.isTraditionalChinese(targetLanguage)) {
             output.append("When a number counts a Chinese noun, add a natural classifier even though the numeral is hidden. ")
+                    .append("When a number denotes a status-effect amplifier, render it as a level such as 3级效果, never 3个效果. ")
                     .append("Express a completion percentage with natural completion/progress predicate-object order; ")
                     .append("do not treat it as a destination or object.");
         }
@@ -160,6 +170,16 @@ final class NumericTranslationContext {
         String before = text.substring(Math.max(start, anchor - 96), anchor);
         return COMPLETION_VERB.matcher(before).find()
                 && hasWordAfter(text, anchor + 1);
+    }
+
+    private static boolean effectLevel(String text, int anchor) {
+        String next = wordAfter(text, anchor + 1).toLowerCase(Locale.ROOT);
+        if (EFFECT_CUES.contains(next)) {
+            return !wordBefore(text, anchor).isEmpty();
+        }
+        String previous = wordBefore(text, anchor).toLowerCase(Locale.ROOT);
+        return "level".equals(previous) || "lvl".equals(previous)
+                || "tier".equals(previous);
     }
 
     private static boolean hasWordAfter(String text, int start) {
@@ -286,6 +306,7 @@ final class NumericTranslationContext {
         private final String value;
         private final Kind kind;
         private final boolean likelyCount;
+        private final boolean effectLevel;
         private final boolean completionPercentage;
         private final boolean wholeSentence;
         private final String sourceWindow;
@@ -295,6 +316,7 @@ final class NumericTranslationContext {
                 String value,
                 Kind kind,
                 boolean likelyCount,
+                boolean effectLevel,
                 boolean completionPercentage,
                 boolean wholeSentence,
                 String sourceWindow
@@ -303,6 +325,7 @@ final class NumericTranslationContext {
             this.value = value;
             this.kind = kind;
             this.likelyCount = likelyCount;
+            this.effectLevel = effectLevel;
             this.completionPercentage = completionPercentage;
             this.wholeSentence = wholeSentence;
             this.sourceWindow = sourceWindow;
@@ -312,6 +335,7 @@ final class NumericTranslationContext {
         String value() { return value; }
         Kind kind() { return kind; }
         boolean likelyCount() { return likelyCount; }
+        boolean effectLevel() { return effectLevel; }
         boolean completionPercentage() { return completionPercentage; }
         boolean wholeSentence() { return wholeSentence; }
         String sourceWindow() { return sourceWindow; }

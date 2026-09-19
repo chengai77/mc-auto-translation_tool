@@ -37,7 +37,7 @@ const versions = [
 ];
 
 const githubDownloadBase =
-  "https://github.com/wuxiangdan96-byte/mc-auto-translation-tool/raw/refs/heads/main/downloads/1.0";
+  "https://github.com/chengai77/mc-auto-translation_tool/raw/refs/heads/main/downloads/1.0";
 
 const downloads = [
   {
@@ -234,7 +234,7 @@ export default function Home() {
         </div>
         <div className="downloadMeta">
           <a href={`${githubDownloadBase}/SHA256SUMS.txt`}>SHA-256 校验文件</a>
-          <a href="https://github.com/wuxiangdan96-byte/mc-auto-translation-tool">查看 GitHub 源代码</a>
+          <a href="https://github.com/chengai77/mc-auto-translation_tool">查看 GitHub 源代码</a>
           <a href="https://space.bilibili.com/3546631091783712">原作者：B站「我小张7272635」</a>
           <span>转载或改编请保留原作者署名 · MIT License</span>
         </div>

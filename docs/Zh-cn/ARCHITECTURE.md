@@ -36,9 +36,12 @@
 
 ## 捕获策略
 
-- Fabric 1.21.11、26.1 与 26.2 分别在对应版本的 `DrawContext`/`GuiGraphicsExtractor` 和
+- Fabric 1.21.10、1.21.11、26.1、26.2 与 26.3 分别在对应版本的 `DrawContext`/`GuiGraphicsExtractor` 和
   `TextRenderer`/`Font` 最终渲染入口替换显示副本，
   并在聊天、记分板、Tab、标题、Action Bar 和 Boss Bar 渲染期间记录内容类型。
+- Fabric 1.16.5 没有 `DrawContext` 与 `TextDisplay`，该模块改用 `MatrixStack` 与
+  `DrawableHelper` 静态绘制，标题与副标题共用 `InGameHud#setTitles` 入口，
+  因此不提供全息文本翻译，只保留通用字体入口捕获。
 - Forge 1.8.9/1.12.2 使用同一个 LaunchWrapper ASM 核心插件，在
   `FontRenderer` 的绘制与宽度计算入口替换字符串；聊天 HUD 另有轻量上下文，
   用于执行聊天隐私开关。

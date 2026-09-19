@@ -23,7 +23,6 @@ abstract class EntityNameRenderStateMixin {
                 && (entity.isInvisible() || ((ArmorStand) entity).isMarker())) {
             return;
         }
-        state.nameTag = RenderedTextBridge.translateEntityName(state.nameTag);
-        state.scoreText = RenderedTextBridge.translateEntityName(state.scoreText);
+        state.nameTag = RenderedTextBridge.translateEntityName(entity, state.nameTag);
     }
 }

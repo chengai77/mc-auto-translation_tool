@@ -1,0 +1,566 @@
+package org.universaltranslator.neoforge;
+
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
+import org.universaltranslator.core.TranslationDisplayMode;
+import org.universaltranslator.core.OfflineModel;
+import org.universaltranslator.core.TargetLanguage;
+import org.universaltranslator.core.TranslationStatusLocalizer;
+import org.universaltranslator.core.TranslationTextColor;
+
+/** U键设置页 */
+final class UniversalTranslatorConfigScreen extends Screen {
+    private final Screen parent;
+    private final NeoForgeConfig original;
+    private boolean enabled;
+    private boolean translateChat;
+    private boolean translateOther;
+    private boolean translateOutgoing;
+    private boolean diskCache;
+    private boolean offlineAutoDownload;
+    private OfflineModel offlineModel;
+    private TranslationDisplayMode displayMode;
+    private boolean translateEnglishOnly;
+    private TranslationTextColor translatedTextColor;
+    private String provider;
+    private String llmEndpoint;
+    private String llmApiKey;
+    private String llmModel;
+    private String tencentSecretId;
+    private String tencentSecretKey;
+    private String tencentModel;
+    private String deepSeekApiKey;
+    private String deepSeekModel;
+    private String dashScopeApiKey;
+    private String dashScopeModel;
+    private String zhipuApiKey;
+    private String zhipuModel;
+    private String kimiApiKey;
+    private String kimiModel;
+    private EditBox targetLanguage;
+    private EditBox endpoint;
+    private Button enabledButton;
+    private Button chatButton;
+    private Button otherButton;
+    private Button cacheButton;
+    private Button providerButton;
+    private Button displayButton;
+    private Button downloadButton;
+    private Button modelButton;
+    private Button cacheEditorButton;
+    private Button mixedTextButton;
+    private Button colorButton;
+    private Button outgoingButton;
+    private Button targetLanguageButton;
+    private String status = "";
+
+    UniversalTranslatorConfigScreen(Screen parent, NeoForgeConfig config) {
+        super(Component.translatable("screen.universal_translator.settings.title"));
+        this.parent = parent;
+        this.original = config;
+        this.enabled = config.enabled;
+        this.translateChat = config.translateChat;
+        this.translateOther = config.translateOther;
+        this.translateOutgoing = config.translateOutgoing;
+        this.diskCache = config.diskCache;
+        this.offlineAutoDownload = config.offlineAutoDownload;
+        this.offlineModel = config.offlineModel;
+        this.displayMode = config.displayMode;
+        this.translateEnglishOnly = config.translateEnglishOnly;
+        this.translatedTextColor = config.translatedTextColor;
+        this.provider = config.provider;
+        this.llmEndpoint = config.llmEndpoint;
+        this.llmApiKey = config.llmApiKey;
+        this.llmModel = config.llmModel;
+        this.tencentSecretId = config.tencentSecretId;
+        this.tencentSecretKey = config.tencentSecretKey;
+        this.tencentModel = config.tencentModel;
+        this.deepSeekApiKey = config.deepSeekApiKey;
+        this.deepSeekModel = config.deepSeekModel;
+        this.dashScopeApiKey = config.dashScopeApiKey;
+        this.dashScopeModel = config.dashScopeModel;
+        this.zhipuApiKey = config.zhipuApiKey;
+        this.zhipuModel = config.zhipuModel;
+        this.kimiApiKey = config.kimiApiKey;
+        this.kimiModel = config.kimiModel;
+    }
+
+    @Override
+    protected void init() {
+        String targetValue = targetLanguage == null
+                ? defaultTargetLanguage(original.targetLanguage) : targetLanguage.getValue();
+        String endpointValue = endpoint == null ? original.endpoint : endpoint.getValue();
+        Layout layout = layout();
+        int left = layout.left;
+        this.enabledButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            enabled = !enabled;
+            refreshLabels();
+        }).bounds(left, layout.row(0), layout.buttonWidth, 20).build());
+        this.cacheButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            diskCache = !diskCache;
+            refreshLabels();
+        }).bounds(layout.right, layout.row(0), layout.buttonWidth, 20).build());
+        this.chatButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            translateChat = !translateChat;
+            refreshLabels();
+        }).bounds(left, layout.row(1), layout.buttonWidth, 20).build());
+        this.otherButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            translateOther = !translateOther;
+            refreshLabels();
+        }).bounds(layout.right, layout.row(1), layout.buttonWidth, 20).build());
+        this.providerButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            if (this.minecraft != null) {
+                this.minecraft.setScreen(new UniversalTranslatorProviderScreen(this));
+            }
+        }).bounds(left, layout.row(2), layout.buttonWidth, 20).build());
+        this.displayButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            displayMode = displayMode == TranslationDisplayMode.ORIGINAL_AND_TRANSLATED
+                    ? TranslationDisplayMode.TRANSLATED_ONLY
+                    : TranslationDisplayMode.ORIGINAL_AND_TRANSLATED;
+            refreshLabels();
+        }).bounds(layout.right, layout.row(2), layout.buttonWidth, 20).build());
+        this.mixedTextButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            translateEnglishOnly = !translateEnglishOnly;
+            refreshLabels();
+        }).bounds(left, layout.row(3), layout.buttonWidth, 20).build());
+        this.colorButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            translatedTextColor = translatedTextColor.next();
+            refreshLabels();
+        }).bounds(layout.right, layout.row(3), layout.buttonWidth, 20).build());
+        this.downloadButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            if (isLlm()) {
+                if (this.minecraft != null) {
+                    this.minecraft.setScreen(new UniversalTranslatorLlmConfigScreen(
+                            this, llmEndpoint, llmModel, !llmApiKey.isEmpty()));
+                }
+            } else if (isOfficialProvider()) {
+                if (this.minecraft != null) {
+                    this.minecraft.setScreen(new UniversalTranslatorDeepSeekConfigScreen(
+                            this, provider, officialModel(provider), !officialApiKey(provider).isEmpty()));
+                }
+            } else if (isTencent()) {
+                if (this.minecraft != null) {
+                    this.minecraft.setScreen(new UniversalTranslatorTencentConfigScreen(
+                            this, tencentSecretId, tencentModel, !tencentSecretKey.isEmpty()));
+                }
+            } else {
+                offlineAutoDownload = !offlineAutoDownload;
+            }
+            refreshLabels();
+        }).bounds(left, layout.row(4), layout.buttonWidth, 20).build());
+        this.outgoingButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            translateOutgoing = !translateOutgoing;
+            refreshLabels();
+        }).bounds(layout.right, layout.row(4), layout.buttonWidth, 20).build());
+        this.modelButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            offlineModel = offlineModel.next();
+            refreshLabels();
+        }).bounds(left, layout.row(5), layout.buttonWidth, 20).build());
+        this.cacheEditorButton = addRenderableWidget(Button.builder(
+                Component.translatable("screen.universal_translator.option.cache_editor"), button -> {
+                    if (this.minecraft != null) {
+                        this.minecraft.setScreen(new UniversalTranslatorCacheScreen(this));
+                    }
+                }).bounds(layout.right, layout.row(5), layout.buttonWidth, 20).build());
+        int presetWidth = Math.max(46, Math.min(68, layout.buttonWidth / 2));
+        int languageWidth = layout.buttonWidth - presetWidth - 4;
+        this.targetLanguage = addRenderableWidget(new EditBox(
+                this.font, left, layout.targetY, languageWidth, 20,
+                Component.translatable("screen.universal_translator.target_language")));
+        this.targetLanguage.setMaxLength(32);
+        this.targetLanguage.setValue(targetValue);
+        this.targetLanguageButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+            targetLanguage.setValue(TargetLanguage.nextPreset(targetLanguage.getValue()));
+            refreshLabels();
+        }).bounds(left + languageWidth + 4, layout.targetY, presetWidth, 20).build());
+        this.endpoint = addRenderableWidget(new EditBox(
+                this.font, layout.right, layout.targetY, layout.buttonWidth, 20,
+                Component.translatable("screen.universal_translator.endpoint")));
+        this.endpoint.setMaxLength(512);
+        this.endpoint.setHint(Component.literal("http://127.0.0.1:5000/..."));
+        this.endpoint.setValue(endpointValue);
+        addRenderableWidget(Button.builder(Component.translatable("screen.universal_translator.save"), button -> saveAndApply())
+                .bounds(left, layout.saveY, layout.buttonWidth, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), button -> onClose())
+                .bounds(layout.right, layout.saveY, layout.buttonWidth, 20).build());
+        refreshLabels();
+    }
+
+    private void refreshLabels() {
+        enabledButton.setMessage(Component.translatable("screen.universal_translator.option.automatic", onOff(enabled)));
+        chatButton.setMessage(Component.translatable("screen.universal_translator.option.chat", onOff(translateChat)));
+        otherButton.setMessage(Component.translatable("screen.universal_translator.option.other", onOff(translateOther)));
+        cacheButton.setMessage(Component.translatable("screen.universal_translator.option.cache", onOff(diskCache)));
+        providerButton.setMessage(Component.translatable("screen.universal_translator.option.change_provider"));
+        displayButton.setMessage(Component.translatable("screen.universal_translator.option.display",
+                tr(displayMode == TranslationDisplayMode.ORIGINAL_AND_TRANSLATED
+                        ? "value.universal_translator.display_bilingual"
+                        : "value.universal_translator.display_translated")));
+        mixedTextButton.setMessage(Component.translatable("screen.universal_translator.option.mixed", onOff(translateEnglishOnly)));
+        colorButton.setMessage(Component.translatable("screen.universal_translator.option.color", colorLabel(translatedTextColor)));
+        downloadButton.setMessage(isLlm()
+                ? Component.translatable("screen.universal_translator.option.llm_settings")
+                : (isOfficialProvider()
+                ? Component.translatable("screen.universal_translator.option.official_settings", providerLabel())
+                : (isTencent()
+                ? Component.translatable("screen.universal_translator.option.tencent_settings")
+                : Component.translatable("screen.universal_translator.option.download", onOff(offlineAutoDownload)))));
+        modelButton.setMessage(Component.translatable("screen.universal_translator.option.model", offlineModel.displayName()));
+        outgoingButton.setMessage(Component.translatable("screen.universal_translator.option.outgoing", onOff(translateOutgoing)));
+        targetLanguageButton.setMessage(Component.translatable("screen.universal_translator.option.target_preset",
+                TargetLanguage.displayName(targetLanguage.getValue())));
+        downloadButton.active = isOffline() || isLlm() || isOfficialProvider() || isTencent();
+        modelButton.active = isOffline();
+    }
+
+    private static String onOff(boolean value) {
+        return tr(value ? "value.universal_translator.on" : "value.universal_translator.off");
+    }
+
+    private static boolean isFailureStatus(String value) {
+        return TranslationStatusLocalizer.isFailure(value);
+    }
+
+    private void saveAndApply() {
+        boolean runtimeChanged = false;
+        try {
+            if (targetLanguage.getValue().trim().isEmpty()) {
+                throw new IllegalArgumentException(tr("error.universal_translator.target_required"));
+            }
+            String selectedProvider = isLlm() ? "custom-api" : provider;
+            if ("custom-api".equalsIgnoreCase(selectedProvider)
+                    && (llmEndpoint.trim().isEmpty() || llmModel.trim().isEmpty())) {
+                throw new IllegalArgumentException(tr("error.universal_translator.llm_required"));
+            }
+            if (NeoForgeConfig.isOfficialProvider(selectedProvider)
+                    && (officialApiKey(selectedProvider).trim().isEmpty() || officialModel(selectedProvider).trim().isEmpty())) {
+                throw new IllegalArgumentException(tr("error.universal_translator.official_required"));
+            }
+            NeoForgeConfig updated = buildConfig();
+            if (updated.enabled && "tencent-hunyuan".equalsIgnoreCase(updated.provider)
+                    && (updated.tencentSecretId.isEmpty() || updated.tencentSecretKey.isEmpty())) {
+                throw new IllegalArgumentException(tr("error.universal_translator.tencent_credentials"));
+            }
+            if (updated.enabled && NeoForgeConfig.isOfficialProvider(updated.provider)
+                    && updated.officialApiKey(updated.provider).isEmpty()) {
+                throw new IllegalArgumentException(tr("error.universal_translator.official_credentials"));
+            }
+            if (updated.enabled) {
+                updated.validateProviderConfiguration();
+            }
+            runtimeChanged = true;
+            NeoForgeTranslationRuntime.initialize(updated);
+            updated.save();
+            status = tr("status.universal_translator.saved");
+            onClose();
+        } catch (Exception exception) {
+            if (runtimeChanged) {
+                try {
+                    NeoForgeTranslationRuntime.initialize(original);
+                } catch (Exception restoreFailure) {
+                    exception.addSuppressed(restoreFailure);
+                }
+            }
+            status = tr("status.universal_translator.save_failed", exception.getMessage());
+        }
+    }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+        graphics.centeredText(this.font, this.title, this.width / 2, 18, 0xFFFFFF);
+        Layout layout = layout();
+        int left = layout.left;
+        graphics.text(this.font, Component.translatable("screen.universal_translator.target_language_hint"),
+                left, layout.targetY - 11, 0xA0A0A0);
+        graphics.text(this.font,
+                Component.translatable("screen.universal_translator.endpoint_hint"),
+                layout.right, layout.targetY - 11, 0xA0A0A0);
+        String rawRuntimeStatus = NeoForgeTranslationRuntime.status();
+        String runtimeStatus = TranslationStatusLocalizer.localize(rawRuntimeStatus,
+                UniversalTranslatorConfigScreen::tr);
+        int belowSave = layout.saveY + 28;
+        int messageY = belowSave <= this.height - 10 ? belowSave : layout.saveY - 14;
+        if (!status.isEmpty()) {
+            graphics.centeredText(this.font, Component.literal(status),
+                    this.width / 2, messageY, 0xFF5555);
+        } else if (!runtimeStatus.isEmpty()) {
+            graphics.centeredText(this.font, Component.literal(runtimeStatus),
+                    this.width / 2, messageY,
+                    isFailureStatus(rawRuntimeStatus) ? 0xFF5555 : 0x55FF55);
+        } else if (layout.saveY - layout.endpointY >= 52) {
+            int infoY = layout.endpointY + 28;
+            graphics.centeredText(
+                    this.font,
+                    Component.translatable(isOffline()
+                            ? "screen.universal_translator.info.offline"
+                            : "screen.universal_translator.info.api"),
+                    this.width / 2, infoY, 0xFFAA55);
+            graphics.centeredText(this.font,
+                    Component.translatable("screen.universal_translator.info.keybind"),
+                    this.width / 2, infoY + 15, 0xA0A0A0);
+        }
+        super.extractRenderState(graphics, mouseX, mouseY, delta);
+        Component watermark = Component.literal("由承挨二次开发");
+        graphics.text(this.font, watermark,
+                Math.max(4, this.width - this.font.width(watermark) - 6),
+                Math.max(4, this.height - this.font.lineHeight - 4), 0x88B0B0B0);
+    }
+
+    @Override
+    public void onClose() {
+        if (this.minecraft != null) {
+            this.minecraft.setScreen(parent);
+        }
+    }
+
+    @Override
+    public boolean isPauseScreen() {
+        return false;
+    }
+
+    private boolean isTencent() {
+        return "tencent-hunyuan".equalsIgnoreCase(provider);
+    }
+
+    private boolean isOfficialProvider() {
+        return NeoForgeConfig.isOfficialProvider(provider);
+    }
+
+    private boolean isOffline() {
+        return "offline".equalsIgnoreCase(provider);
+    }
+
+    private boolean isLlm() {
+        return "custom-api".equalsIgnoreCase(provider)
+                || "openai-compatible".equalsIgnoreCase(provider);
+    }
+
+    String providerLabel() {
+        if (isOffline()) {
+            return tr("value.universal_translator.provider_offline");
+        }
+        if (isTencent()) {
+            return tr("value.universal_translator.provider_tencent");
+        }
+        if ("deepseek".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_deepseek");
+        }
+        if ("dashscope".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_dashscope");
+        }
+        if ("zhipu".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_zhipu");
+        }
+        if ("kimi".equalsIgnoreCase(provider)) {
+            return tr("value.universal_translator.provider_kimi");
+        }
+        return isLlm() ? tr("value.universal_translator.provider_llm") : "Libre";
+    }
+
+    String provider() {
+        return provider;
+    }
+
+    void selectProvider(String provider) {
+        this.provider = provider == null || provider.trim().isEmpty() ? "offline" : provider.trim();
+        refreshLabels();
+    }
+
+    void applyLlmSettings(String endpoint, String model, String apiKey) {
+        this.llmEndpoint = endpoint;
+        this.llmModel = model;
+        this.llmApiKey = apiKey;
+    }
+
+    String llmApiKey() {
+        return llmApiKey;
+    }
+
+    void applyTencentSettings(String secretId, String secretKey, String model) {
+        this.tencentSecretId = secretId;
+        this.tencentSecretKey = secretKey;
+        this.tencentModel = model;
+    }
+
+    String tencentSecretKey() {
+        return tencentSecretKey;
+    }
+
+    void applyOfficialProviderSettings(String selectedProvider, String model, String apiKey) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            this.dashScopeModel = model;
+            this.dashScopeApiKey = apiKey;
+        } else if ("zhipu".equals(normalized)) {
+            this.zhipuModel = model;
+            this.zhipuApiKey = apiKey;
+        } else if ("kimi".equals(normalized)) {
+            this.kimiModel = model;
+            this.kimiApiKey = apiKey;
+        } else {
+            this.deepSeekModel = model;
+            this.deepSeekApiKey = apiKey;
+        }
+    }
+
+    String officialApiKey(String selectedProvider) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            return dashScopeApiKey;
+        }
+        if ("zhipu".equals(normalized)) {
+            return zhipuApiKey;
+        }
+        if ("kimi".equals(normalized)) {
+            return kimiApiKey;
+        }
+        return deepSeekApiKey;
+    }
+
+    String officialModel(String selectedProvider) {
+        String normalized = normalizeOfficialProvider(selectedProvider);
+        if ("dashscope".equals(normalized)) {
+            return dashScopeModel;
+        }
+        if ("zhipu".equals(normalized)) {
+            return zhipuModel;
+        }
+        if ("kimi".equals(normalized)) {
+            return kimiModel;
+        }
+        return deepSeekModel;
+    }
+
+    String defaultOfficialModel(String selectedProvider) {
+        return original.defaultOfficialModel(selectedProvider);
+    }
+
+    private static String normalizeOfficialProvider(String selectedProvider) {
+        if (selectedProvider == null) {
+            return "deepseek";
+        }
+        String normalized = selectedProvider.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("aliyun-dashscope".equals(normalized)) {
+            return "dashscope";
+        }
+        if ("zhipu-ai".equals(normalized)) {
+            return "zhipu";
+        }
+        if ("moonshot".equals(normalized) || "moonshot-kimi".equals(normalized)) {
+            return "kimi";
+        }
+        return normalized;
+    }
+
+    private NeoForgeConfig buildConfig() {
+        String selectedProvider = isLlm() ? "custom-api" : provider;
+        return original.withSettings(
+                enabled,
+                translateChat,
+                translateOther,
+                translateOutgoing,
+                targetLanguage.getValue(),
+                original.outgoingTargetLanguage,
+                displayMode,
+                translateEnglishOnly,
+                translatedTextColor,
+                selectedProvider,
+                endpoint.getValue(),
+                llmEndpoint,
+                llmApiKey,
+                llmModel,
+                offlineAutoDownload,
+                offlineModel,
+                original.apiFallback,
+                diskCache)
+                .withTencentSettings(tencentSecretId, tencentSecretKey, tencentModel)
+                .withOfficialProviderSettings("deepseek", deepSeekApiKey, deepSeekModel)
+                .withOfficialProviderSettings("dashscope", dashScopeApiKey, dashScopeModel)
+                .withOfficialProviderSettings("zhipu", zhipuApiKey, zhipuModel)
+                .withOfficialProviderSettings("kimi", kimiApiKey, kimiModel);
+    }
+
+    void clearTencentSettings() {
+        this.tencentSecretId = "";
+        this.tencentSecretKey = "";
+        this.tencentModel = "";
+        saveClearedConfig();
+    }
+
+    void clearLlmSettings() {
+        this.llmEndpoint = "";
+        this.llmApiKey = "";
+        this.llmModel = "";
+        saveClearedConfig();
+    }
+
+    private void saveClearedConfig() {
+        NeoForgeConfig cleared = buildConfig();
+        try {
+            cleared.save();
+        } catch (Exception ignored) {
+            // 清空后忽略保存错误
+        }
+        try {
+            NeoForgeTranslationRuntime.initialize(cleared);
+        } catch (Exception ignored) {
+            // 下次保存刷新
+        }
+    }
+
+    private static String colorLabel(TranslationTextColor color) {
+        switch (color) {
+            case ORIGINAL: return tr("value.universal_translator.color.original");
+            case GREEN: return tr("value.universal_translator.color.green");
+            case GOLD: return tr("value.universal_translator.color.gold");
+            case LIGHT_PURPLE: return tr("value.universal_translator.color.light_purple");
+            case YELLOW: return tr("value.universal_translator.color.yellow");
+            case WHITE: return tr("value.universal_translator.color.white");
+            case AQUA:
+            default: return tr("value.universal_translator.color.aqua");
+        }
+    }
+
+    private static String tr(String key, Object... arguments) {
+        return Component.translatable(key, arguments).getString();
+    }
+
+    private static String defaultTargetLanguage(String value) {
+        return value == null || value.trim().isEmpty() || "-".equals(value.trim()) ? "zh-CN" : value;
+    }
+
+    private Layout layout() {
+        int totalWidth = Math.max(180, Math.min(310, this.width - 20));
+        int gap = 8;
+        int buttonWidth = (totalWidth - gap) / 2;
+        int left = (this.width - totalWidth) / 2;
+        int top = Math.max(20, Math.min(44, 20 + Math.max(0, this.height - 220) / 4));
+        int rowStep = this.height >= 300 ? 26 : (this.height >= 260 ? 22 : 20);
+        int targetY = top + rowStep * 6 + 2;
+        int endpointY = targetY + (this.height >= 300 ? 32 : 28);
+        int saveY = this.height >= 330 ? 270 : Math.max(endpointY + 22, this.height - 24);
+        return new Layout(left, left + buttonWidth + gap, totalWidth, buttonWidth,
+                top, rowStep, targetY, endpointY, saveY);
+    }
+
+    private static final class Layout {
+        private final int left, right, totalWidth, buttonWidth;
+        private final int top, rowStep, targetY, endpointY, saveY;
+
+        private Layout(int left, int right, int totalWidth, int buttonWidth,
+                       int top, int rowStep, int targetY, int endpointY, int saveY) {
+            this.left = left; this.right = right;
+            this.totalWidth = totalWidth; this.buttonWidth = buttonWidth;
+            this.top = top; this.rowStep = rowStep;
+            this.targetY = targetY; this.endpointY = endpointY; this.saveY = saveY;
+        }
+
+        private int row(int index) {
+            return top + rowStep * index;
+        }
+    }
+}
+

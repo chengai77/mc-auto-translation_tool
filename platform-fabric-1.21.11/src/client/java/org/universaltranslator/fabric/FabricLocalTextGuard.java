@@ -1,66 +1,57 @@
 package org.universaltranslator.fabric;
 
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import org.universaltranslator.core.TranslationTextStyling;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
 
 /** 本地输入识别 */
 final class FabricLocalTextGuard {
-    private static volatile Field chatField;
-    private static volatile boolean searched;
-
     private FabricLocalTextGuard() {
     }
 
-    static boolean isLocalChatInput(MinecraftClient client, String rendered) {
-        if (client == null || !(client.currentScreen instanceof ChatScreen)
-                || rendered == null || rendered.isEmpty()) {
+    static boolean isLocalInput(MinecraftClient client, String rendered) {
+        if (client == null || rendered == null || rendered.isEmpty()) {
             return false;
         }
-        TextFieldWidget field = findChatField(client.currentScreen);
-        return field != null && matches(field.getText(), rendered);
-    }
-
-    private static TextFieldWidget findChatField(Screen screen) {
-        Field known = chatField;
-        if (!searched) {
-            synchronized (FabricLocalTextGuard.class) {
-                if (!searched) {
-                    chatField = findTextField(screen.getClass());
-                    searched = true;
-                }
-                known = chatField;
+        for (TextFieldWidget field : findTextFields(client.currentScreen)) {
+            if (field.isFocused() && matches(field.getText(), rendered)) {
+                return true;
             }
         }
-        if (known == null) {
-            return null;
-        }
-        try {
-            Object value = known.get(screen);
-            return value instanceof TextFieldWidget ? (TextFieldWidget) value : null;
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-            return null;
-        }
+        return false;
     }
 
-    private static Field findTextField(Class<?> type) {
-        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+    private static List<TextFieldWidget> findTextFields(Screen screen) {
+        List<TextFieldWidget> fields = new ArrayList<TextFieldWidget>();
+        if (screen == null) {
+            return fields;
+        }
+        for (Object child : screen.children()) {
+            if (child instanceof TextFieldWidget) {
+                fields.add((TextFieldWidget) child);
+            }
+        }
+        for (Class<?> current = screen.getClass(); current != null; current = current.getSuperclass()) {
             for (Field field : current.getDeclaredFields()) {
-                if (TextFieldWidget.class.isAssignableFrom(field.getType())) {
-                    try {
-                        field.setAccessible(true);
-                        return field;
-                    } catch (RuntimeException ignored) {
-                        return null;
+                if (!TextFieldWidget.class.isAssignableFrom(field.getType())) {
+                    continue;
+                }
+                try {
+                    field.setAccessible(true);
+                    Object value = field.get(screen);
+                    if (value instanceof TextFieldWidget) {
+                        fields.add((TextFieldWidget) value);
                     }
+                } catch (ReflectiveOperationException | RuntimeException ignored) {
                 }
             }
         }
-        return null;
+        return fields;
     }
 
     private static boolean matches(String typed, String rendered) {
@@ -68,9 +59,7 @@ final class FabricLocalTextGuard {
             return false;
         }
         String visible = TranslationTextStyling.stripLegacyFormatting(rendered);
-        if (visible.equals(typed) || visible.equals(typed + "_")) {
-            return true;
-        }
-        return visible.length() >= 2 && typed.contains(visible);
+        return visible.equals(typed) || visible.equals(typed + "_")
+                || visible.length() >= 2 && typed.contains(visible);
     }
 }

@@ -8,9 +8,12 @@ Each Minecraft version requires its matching JAR. Do not mix them:
 
 | Minecraft | Mod loader | Java | Also required |
 | --- | --- | --- | --- |
+| 26.3 (no released JAR yet) | Fabric | 25 | Fabric API |
 | 26.2 (no released JAR yet) | Fabric | 25 | Fabric API |
 | 26.1 (no released JAR yet) | Fabric | 25 | Fabric API |
 | 1.21.11 | Fabric | 21 | Fabric API |
+| 1.21.10 (no released JAR yet) | Fabric | 21 | Fabric API |
+| 1.16.5 (no released JAR yet) | Fabric | 8 | Fabric API (mod id is `fabric` in that era) |
 | 1.12.2 | Forge 14.23.5.x | 8 | No additional mod |
 | 1.8.9 | Forge 11.15.1.x | 8 | No additional mod |
 
@@ -25,7 +28,7 @@ Place the correct JAR in the game instance's `mods` folder. The server does not 
 4. Choose whether chat content and other interface text may be sent, and whether to use the local cache.
 5. The default display option is “Translated only.” Replacing the source directly prevents bilingual text from overflowing scoreboards and chest interfaces; switch to “Original + translation” when needed.
 6. “Translate only English in mixed text” is enabled by default, so existing Chinese is not translated again.
-7. Choose a translation color. Select “Keep original color” to disable color differentiation.
+7. Choose a translation color. The default is “Keep original color,” which keeps each source text's own color.
 8. Read the privacy notice in the interface, enable automatic translation, and save.
 
 “Outgoing translation” is disabled by default. Enable it separately to translate messages you send
@@ -48,7 +51,7 @@ installations use the following defaults:
 provider=offline
 display-mode=translated-only
 translate-english-only=true
-translated-text-color=aqua
+translated-text-color=original
 offline-auto-download=true
 offline-model=lite
 api-fallback=false
@@ -159,8 +162,8 @@ and preserved exactly. They are not sent to the translation model or API.
 
 For mixed text such as “Welcome 欢迎,” only `Welcome` is sent to the translation service by
 default. The existing Chinese text is reassembled locally without changes. This behavior can be
-disabled in the settings. Translations are aqua by default; green, gold, light purple, yellow,
-white, and original-color options are also available.
+disabled in the settings. Translations keep the original color by default; aqua, green, gold,
+light purple, yellow, and white are also available.
 
 Text cannot be captured automatically when a server embeds it in an image or a third-party mod
 bypasses the vanilla font renderer. Complex multicolored Text components may currently preserve
@@ -206,7 +209,10 @@ chat verification may impose their own restrictions, which is why the feature is
 This guide covers the `1.1` release. All three target versions completed clean builds, remapping,
 and the shared-core self-test. Hands-on launch validation completed before 1.0 remains the
 compatibility baseline. Fabric 26.1 passed build and main-menu launch checks. Fabric 26.2 has source
-adaptation and build checks complete, with an actual launch still pending. Neither has a release JAR
+adaptation and build checks complete, with an actual launch still pending; Fabric 26.3 has the same
+status and is Fabric-only. Fabric 1.16.5 passed a clean build, remapping, the shared-core self-test,
+and a main-menu launch check; it is Fabric-only and does not provide hologram text (TextDisplay)
+translation because the 1.16.5 API has no such entity. None of them has a release JAR
 or completed in-server regression. Back up the configuration before updating. When reporting untranslated
 interface text, include the Minecraft version, loader version, interface location, and `latest.log`,
 but omit API keys and private chat content.

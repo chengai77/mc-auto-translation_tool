@@ -19,7 +19,6 @@ import org.universaltranslator.core.TranslationStatusLocalizer;
 public final class UniversalTranslatorFabricClient implements ClientModInitializer {
     public static final String MOD_ID = "universal_translator";
     private static final long FAILURE_NOTIFICATION_COOLDOWN_MILLIS = 60_000L;
-    private static final long PROGRESS_NOTIFICATION_REFRESH_MILLIS = 1_000L;
     private static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
     private static final KeyMapping OPEN_SETTINGS = KeyMappingHelper.registerKeyMapping(
             new KeyMapping(
@@ -43,7 +42,6 @@ public final class UniversalTranslatorFabricClient implements ClientModInitializ
     private static int joinHintTicks = -1;
     private static String lastRuntimeStatus = "";
     private static long nextFailureNotificationAt;
-    private static long nextProgressNotificationAt;
     private static boolean resendingTranslatedMessage;
 
     @Override
@@ -57,6 +55,7 @@ public final class UniversalTranslatorFabricClient implements ClientModInitializ
             FabricTranslationRuntime.shutdown();
         }
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            FabricTranslationRuntime.tickUrgentHudText();
             boolean connected = client.level != null && client.getConnection() != null;
             if (connected && !connectedLastTick) {
                 TranslationLog.clear();
@@ -82,7 +81,6 @@ public final class UniversalTranslatorFabricClient implements ClientModInitializ
                     FabricTranslationRuntime.initialize(updated);
                     lastRuntimeStatus = "";
                     nextFailureNotificationAt = 0L;
-                    nextProgressNotificationAt = 0L;
                     updated.save();
                     client.gui.hud.setOverlayMessage(
                             Component.translatable("message.universal_translator.toggle",
@@ -184,21 +182,26 @@ public final class UniversalTranslatorFabricClient implements ClientModInitializ
         long now = System.currentTimeMillis();
         boolean downloadProgress = TranslationStatusLocalizer.isDownloadProgress(current);
         boolean changed = !current.equals(lastRuntimeStatus);
-        if (!changed && (!downloadProgress || now < nextProgressNotificationAt)) {
+        if (downloadProgress) {
+            lastRuntimeStatus = current;
+            return;
+        }
+        if (!changed) {
             return;
         }
         lastRuntimeStatus = current;
         if (current.isEmpty()) {
-            nextProgressNotificationAt = 0L;
             if (!connected) {
                 nextFailureNotificationAt = 0L;
             }
             return;
         }
+        if (!isFailureStatus(current) && client.gui.screen() != null) {
+            return;
+        }
         String localized = TranslationStatusLocalizer.localize(current,
                 UniversalTranslatorFabricClient::tr);
         if (isFailureStatus(current)) {
-            nextProgressNotificationAt = 0L;
             if (now < nextFailureNotificationAt) {
                 return;
             }
@@ -207,8 +210,6 @@ public final class UniversalTranslatorFabricClient implements ClientModInitializ
                     Component.translatable("message.universal_translator.runtime_failed", localized));
         } else {
             nextFailureNotificationAt = 0L;
-            nextProgressNotificationAt = downloadProgress
-                    ? now + PROGRESS_NOTIFICATION_REFRESH_MILLIS : 0L;
             client.gui.hud.setOverlayMessage(
                     Component.translatable("message.universal_translator.runtime_status", localized), false);
         }

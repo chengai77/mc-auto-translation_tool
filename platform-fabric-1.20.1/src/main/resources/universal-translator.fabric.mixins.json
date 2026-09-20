@@ -9,6 +9,8 @@
     "BookScreenMixin",
     "DrawContextMixin",
     "EntityNameRenderStateMixin",
+    "MultilineTextMixin",
+    "MultilineTextWidgetMixin",
     "ScreenMixin",
     "SignEditScreenMixin",
     "TextFieldWidgetMixin",

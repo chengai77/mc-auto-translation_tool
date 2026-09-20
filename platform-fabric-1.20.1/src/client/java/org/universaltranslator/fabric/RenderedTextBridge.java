@@ -69,6 +69,22 @@ public final class RenderedTextBridge {
         return rebuildStyledText(text, original, translated, currentKind);
     }
 
+    /** 整段翻译界面文本 */
+    public static StringVisitable translateUiText(StringVisitable text) {
+        if (text == null || TranslationRenderContext.isTextInput()
+                || TranslationRenderContext.isTranslationSuppressed()) {
+            return text;
+        }
+        Text source = text instanceof Text ? (Text) text : Text.literal(text.getString());
+        String original = source.getString();
+        String translated = FabricTranslationRuntime.translateCompleteForRender(
+                original, TextKind.OTHER);
+        if (original.equals(translated)) {
+            return text;
+        }
+        return rebuildStyledText(source, original, translated, TextKind.OTHER);
+    }
+
     public static Text translateBookPage(Text text) {
         return translateDirectText(text, TextKind.BOOK);
     }
